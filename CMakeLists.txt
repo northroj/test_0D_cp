@@ -10,6 +10,7 @@ find_package(draco CONFIG REQUIRED)
 
 find_package(MPI  REQUIRED COMPONENTS C CXX Fortran)
 find_package(GSL  REQUIRED)
+find_package(HDF5 REQUIRED COMPONENTS C CXX)
 
 # Helper: link an executable to many Draco targets if they exist in this install
 function(link_if_exists exe)
@@ -23,7 +24,25 @@ function(link_if_exists exe)
   endforeach()
 endfunction()
 
-add_executable(test_0D_cp src/main.cpp)
+add_executable(test_0D_cp
+  src/main.cpp
+  src/loop.cpp
+  src/utilities.cpp
+)
+
+if (TARGET hdf5::hdf5)
+  target_link_libraries(test_0D_cp PRIVATE hdf5::hdf5)
+elseif (TARGET HDF5::HDF5)
+  target_link_libraries(test_0D_cp PRIVATE HDF5::HDF5)
+else()
+  # Legacy FindHDF5 variables
+  target_include_directories(test_0D_cp PRIVATE ${HDF5_INCLUDE_DIRS})
+  if (HDF5_C_LIBRARIES)
+    target_link_libraries(test_0D_cp PRIVATE ${HDF5_C_LIBRARIES})
+  else()
+    target_link_libraries(test_0D_cp PRIVATE ${HDF5_LIBRARIES})
+  endif()
+endif()
 
 # Link against all Draco library targets present in the file (skip Exe_*).
 # (Order here doesn’t matter—CMake handles transitive links via imported target metadata.)

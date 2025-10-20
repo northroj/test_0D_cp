@@ -1,0 +1,18 @@
+[materials]
+ion_temperature 25
+electron_temperature 25
+particles d t a
+number_densities 1e-20 1e-20 0.0
+
+[source]
+particle a
+point 0.0 0.0 0.0
+time 0.0
+
+[tallies]
+standard_tallies 1
+
+[settings]
+num_particles 100
+num_t_steps 10
+t_step_size 1
