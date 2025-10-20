@@ -8,6 +8,7 @@ number_densities 1e-20 1e-20 0.0
 particle a
 point 0.0 0.0 0.0
 time 0.0
+energy 10.0
 
 [tallies]
 standard_tallies 1

@@ -23,6 +23,7 @@ extern "C" {
 // Local headers
 #include "utilities.h"
 #include "loop.h"
+#include "garage.h"
 
 
 // UNITS ----------------------------------------------------------------------
@@ -34,28 +35,6 @@ extern "C" {
 
 
 // ---- Global container: garage ----------------------------------------------
-struct Garage {
-    // Categories
-    std::vector<std::shared_ptr<Material>> materials;
-    std::vector<std::shared_ptr<Surface>>  surfaces;
-    std::vector<Particle> active_bank;
-    std::vector<Particle> census_bank;
-    std::vector<Particle> secondary_bank;
-
-    // ---- settings & bookkeeping ----
-    int    num_particles     = 0;
-    int    num_t_steps       = 0;
-    double t_step_size       = 0.0;
-    int    current_time_step = 0;   // initialize to 0
-
-    // Tallies
-    int    standard_tallies  = 0;
-
-    // Source fields
-    std::string         source_particle;        // e.g., "a"
-    std::array<double,3> source_point{0.0,0.0,0.0}; // x,y,z
-    double              source_time = 0.0;
-};
 
 Garage garage;
 
@@ -147,6 +126,8 @@ static bool parse_input_file(const std::filesystem::path& path) {
                 garage.source_point[2] = std::stod(tok[3]);
             } else if (tok[0] == "time" && tok.size() == 2) {
                 garage.source_time = std::stod(tok[1]);
+            } else if (tok[0] == "energy" && tok.size() == 2) {
+                garage.source_energy = std::stod(tok[1]);
             } else {
                 std::cerr << "WARN: Unrecognized source line: " << line << "\n";
             }
@@ -268,7 +249,7 @@ int main(int argc, char** argv) try {
 
     std::cout << "Running <insert_code_name> simulation\n";
     const auto t0_sim = clock_t::now();
-    simulate(cli.input);
+    simulate();
     const auto t1_sim = clock_t::now();
 
     // Write output HDF5 skeleton

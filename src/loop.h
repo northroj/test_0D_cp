@@ -1,5 +1,13 @@
 #pragma once
-#include <filesystem>
 
-// Placeholder for your actual simulation. Thread through what you need later.
-void simulate(const std::filesystem::path& input_file);
+void simulate();
+
+void simulate_timestep(int t_it);
+
+
+void transport_particle(class Particle& p);
+
+
+void source_particles(int t_it);
+
+void population_control();
