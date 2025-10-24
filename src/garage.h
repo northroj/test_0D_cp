@@ -7,7 +7,7 @@
 
 struct Garage {
     // Categories
-    std::vector<std::shared_ptr<Material>> materials;
+    std::vector<Material> materials;
     std::vector<Particle> active_bank;
     std::vector<Particle> census_bank;
     std::vector<Particle> secondary_bank;

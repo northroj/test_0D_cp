@@ -68,8 +68,8 @@ static bool parse_input_file(const std::filesystem::path& path) {
     enum class Section { None, Materials, Source, Tallies, Settings };
     Section sec = Section::None;
 
-    // We'll build a single Material instance from the [materials] block
-    auto mat = std::make_shared<Material>();
+    Material mat;         // current material being built
+    bool     mat_active = false;
 
     std::string line;
     while (std::getline(in, line)) {
@@ -79,6 +79,14 @@ static bool parse_input_file(const std::filesystem::path& path) {
         // section headers
         if (line.front() == '[' && line.back() == ']') {
             std::string name = line.substr(1, line.size()-2);
+
+            // If we were in a [materials] section, finalize the material before switching
+            if (sec == Section::Materials && mat_active) {
+                garage.materials.push_back(std::move(mat));
+                mat = Material{};
+                mat_active = false;
+            }
+
             if      (name == "materials") sec = Section::Materials;
             else if (name == "source")    sec = Section::Source;
             else if (name == "tallies")   sec = Section::Tallies;
@@ -96,19 +104,23 @@ static bool parse_input_file(const std::filesystem::path& path) {
             // ion_temperature 25
             // electron_temperature 25
             // particles d t a
-            // number_densities 1e-20 1e-20 0.0
+            // densities 1e-20 1e-20 0.0
+
             if (tok[0] == "ion_temperature" && tok.size() == 2) {
-                mat->ion_temperature = std::stod(tok[1]);
+                mat.ion_temperature = std::stod(tok[1]);
+                mat_active = true;
             } else if (tok[0] == "electron_temperature" && tok.size() == 2) {
-                mat->electron_temperature = std::stod(tok[1]);
+                mat.electron_temperature = std::stod(tok[1]);
+                mat_active = true;
             } else if (tok[0] == "particles" && tok.size() >= 2) {
-                mat->species.assign(tok.begin()+1, tok.end());
-            } else if (tok[0] == "number_densities" && tok.size() >= 2) {
-                mat->number_densities.clear();
-                mat->number_densities.reserve(tok.size()-1);
-                for (size_t i = 1; i < tok.size(); ++i) {
-                    mat->number_densities.push_back(std::stod(tok[i]));
-                }
+                mat.species.assign(tok.begin() + 1, tok.end());
+                mat_active = true;
+            } else if (tok[0] == "densities" && tok.size() >= 2) {
+                mat.densities.clear();
+                mat.densities.reserve(tok.size() - 1);
+                for (size_t i = 1; i < tok.size(); ++i)
+                    mat.densities.push_back(std::stod(tok[i]));
+                mat_active = true;
             } else {
                 std::cerr << "WARN: Unrecognized materials line: " << line << "\n";
             }
@@ -165,12 +177,12 @@ static bool parse_input_file(const std::filesystem::path& path) {
     }
 
     // Basic consistency check for materials
-    if (!mat->species.empty() || !mat->number_densities.empty()
-        || mat->ion_temperature != 0.0 || mat->electron_temperature != 0.0)
+    if (!mat.species.empty() || !mat.densities.empty()
+        || mat.ion_temperature != 0.0 || mat.electron_temperature != 0.0)
     {
-        if (mat->species.size() != mat->number_densities.size()) {
-            std::cerr << "ERROR: materials: species count (" << mat->species.size()
-                      << ") != number_densities count (" << mat->number_densities.size() << ")\n";
+        if (mat.species.size() != mat.densities.size()) {
+            std::cerr << "ERROR: materials: species count (" << mat.species.size()
+                      << ") != densities count (" << mat.densities.size() << ")\n";
             return false;
         }
         garage.materials.push_back(std::move(mat));
