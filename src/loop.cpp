@@ -37,8 +37,31 @@ static std::mt19937& rng() {
 
 void simulate() {
 
+    // set up time steps
+    time_step_setup("Uniform"); // TODO: add more type in the future
+
+    // set up time step user tallies
+    for (auto &t : garage.tallies) {
+        if (t.time_bins[0] == -1e20) {
+            t.time_bins = garage.time_step_bins;
+            t.finalize(); //redo this to make sure the tally dimensions are correct
+        }
+    }
+
+    // Initialize standard tallies
+    Tally ion_temperature_time = Tally::Make("ion_temperature_time", {"all"}, {0.0,1e20}, garage.time_step_bins, "ion_temperature_time" );
+    Tally electron_temperature_time = Tally::Make("electron_temperature_time", {"e"}, {0.0,1e20}, garage.time_step_bins, "electron_temperature_time" );
+    Tally ion_density_time = Tally::Make("ion_density_time", garage.materials[0].species, {0.0, 1e20}, garage.time_step_bins, "ion_density_time"); // TODO: more than one material
+    Tally energy_dump_ion = Tally::Make("energy_dump_ion", {"all"}, {0.0, 1e20}, garage.time_step_bins, "energy_dump_ion");
+    Tally energy_dump_electron = Tally::Make("energy_dump_electron", {"e"}, {0.0, 1e20}, garage.time_step_bins, "energy_dump_electron");
+
+    garage.standard_tallies.push_back(std::move(ion_temperature_time));
+    garage.standard_tallies.push_back(std::move(electron_temperature_time));
+    garage.standard_tallies.push_back(std::move(ion_density_time));
+    garage.standard_tallies.push_back(std::move(energy_dump_ion));
+    garage.standard_tallies.push_back(std::move(energy_dump_electron));
+
     // Loop over timesteps
-  
     for(int t_it = 0; t_it < garage.num_t_steps; ++t_it) {
         garage.current_time_step = t_it;
         simulate_timestep(t_it);
@@ -47,11 +70,14 @@ void simulate() {
 }
 
 void simulate_timestep(int t_it) {
-    source_particles(t_it);
-    population_control();
 
     // calculate the end of timestep time
-    double time_census = (t_it+1) * garage.t_step_size; // shk
+    double time_census = garage.time_step_bins[t_it+1]; // shk
+    // pre timestep time
+    double time_start = garage.time_step_bins[t_it]; //shk
+
+    source_particles(time_start, time_census);
+    //population_control();
     
     // process active bank; when it empties, refill from secondary_bank
     auto& active    = garage.active_bank;
@@ -73,12 +99,77 @@ void simulate_timestep(int t_it) {
             move_append(active, secondary);
         }
     }
+
+    // pick a value in the timestep
+    double timestep_value = (garage.time_step_bins[t_it+1] - garage.time_step_bins[t_it])  /2.0  + garage.time_step_bins[t_it];
+
+    // update material temperatures
+    // TODO: multiple materials/cells
+    double ion_energy_dep = garage.standard_tallies[3].retrieve("all", timestep_value, 0.1);
+    double electron_energy_dep = garage.standard_tallies[4].retrieve("e", timestep_value, 0.1);
+    // calculate number density
+    double n_ion = 0.0;
+    double n_electron = 0.0;
+    Material& local_material = garage.materials[0];
+    int num_background_species = local_material.species.size();
+    for (int ion_it = 0; ion_it < num_background_species; ++ion_it) {
+        std::string ion_species = local_material.species[ion_it];
+        int ion_z = species_2_z(ion_species);
+        double ion_molar_mass = species_2_z(ion_species);
+        n_ion += local_material.densities[ion_it] * rtt_units::AVOGADRO / ion_molar_mass;
+        n_electron += local_material.densities[ion_it] * rtt_units::AVOGADRO / ion_molar_mass * ion_z;
+    }
+    n_electron = 3.011e24; // FIX: kludge
+    // update assuming ideal monatomic gas
+    double dtemp_ion = 2.0/3.0 * ion_energy_dep / n_ion;
+    double dtemp_electron = 2.0/3.0 * electron_energy_dep / n_electron;
+    if (n_ion == 0.0 || n_electron == 0.0) {
+        std::cout << "Error divide by zero: ion/electron density " << std::endl;
+    }
+    local_material.ion_temperature += dtemp_ion;
+    local_material.electron_temperature += dtemp_electron;
+    //std::cout << "temp update: " << ion_energy_dep << " " << electron_energy_dep << " " << n_ion << " " << n_electron << " " << dtemp_ion << " " << dtemp_electron << std::endl;
+
+
+    // update standard tallies
+    // TODO: make this work with multiple cells/materials
+    // ion temperature
+    garage.standard_tallies[0].add("all", timestep_value, 0.1, garage.materials[0].ion_temperature);
+    // electron temperature
+    garage.standard_tallies[1].add("e", timestep_value, 0.1, garage.materials[0].electron_temperature);
+    // ion_densities
+    for (int species_it = 0; species_it < garage.materials[0].species.size(); ++species_it){
+        std::string species = garage.materials[0].species[species_it];
+        garage.standard_tallies[2].add(species, timestep_value, 0.1, garage.materials[0].densities[species_it]);
+    }
+
+    // update user tallies
+    const std::string specified_category = "average_particle_energy";
+    for (auto &t : garage.tallies) {
+        if (t.tally_category != specified_category) continue;
+
+        // get average particle energy in the census bank by species
+        const auto avgE = average_energy_by_species(garage.census_bank);
+
+        // For each species the tally cares about, if we have that species in the bank,
+        // add the *average energy* as the tally amount.
+        for (const auto &sp : t.species) {
+            auto it = avgE.find(sp);
+            if (it == avgE.end()) continue;
+
+            const double avg_energy = it->second;
+            const double energy_coordinate = 0.1; 
+
+            // Add the average energy as the "count"/value for this (species, time) bin.
+            t.add(sp, timestep_value, energy_coordinate, avg_energy);
+        }
+    }
  
         
     // add the census_bank into the active bank for the next time step
     move_append(garage.active_bank, garage.census_bank);
     
-    if (garage.num_t_steps < 200 || (t_it + 1) % 10 == 0) {
+    if (garage.num_t_steps < 101 || (t_it + 1) % 10 == 0) {
         std::cout << "Finished with timestep: " << t_it + 1 << std::endl;
     }
     
@@ -94,6 +185,8 @@ void transport_particle(Particle& p, double time_census) {
     int particle_active = 2; // 2 = alive, 1 = to census, 0 = killed
 
     while ( particle_active == 2 ){
+
+        //std::cout << "Particle energy keV: " << p.energy << "  time shk: " << p.t << std::endl;
     
         // evaluate stopping power dE/dx and dE/dt
         double dedt_electron = 0.0;  // keV/shk
@@ -103,35 +196,74 @@ void transport_particle(Particle& p, double time_census) {
         //kp_alpha_csd(p); // kp not implemented fully
         spitzer_csd(p, dedt_electron, dedx_electron, dedt_ion, dedx_ion);
 
+        //std::cout << "spitzer parameters: " << dedt_electron << " " << dedx_electron << " " << dedt_ion << " " << dedx_ion << std::endl;
+
         // time for energy loss
-        double t_eloss = (csd_step * p.energy * 1e3 /*MeV -> keV*/ ) / (dedt_electron + dedt_ion); // shk
+        double t_eloss = (csd_step * p.energy) / (dedt_electron + dedt_ion); // shk
         // time to census
         double t_remaining = time_census - p.t;
 
+        //std::cout << "time parameters: " << t_eloss << " " << t_remaining << std::endl;
+
+        double initial_p_t = p.t;
+
         double eloss_total = 0.0;
         if (t_remaining > t_eloss){ // if the full step can be taken
+            //std::cout << "made a complete step" << std::endl;
             // distance for energy loss
-            eloss_total = csd_step * p.energy * 1e3 /*MeV -> keV*/;
+            eloss_total = csd_step * p.energy;
             double dist_eloss = eloss_total / (dedx_electron + dedx_ion); // cm
+            p.t += t_eloss;
         } else {
+            //std::cout << "hit census" << std::endl;
             eloss_total = t_remaining * (dedt_electron + dedt_ion);
             double dist_eloss = eloss_total / (dedx_electron + dedx_ion); // cm
             particle_active = 1;
+            p.t += t_remaining;
         }
 
         // calculate energy loss
         double eloss_electron = eloss_total * (dedt_electron / (dedt_electron + dedt_ion));
         double eloss_ion = eloss_total * (dedt_ion / (dedt_electron + dedt_ion));
+        //std::cout << "energy loss: " << eloss_total << std::endl;
 
+        // Tally csd energy loss
+        //std::cout << "tally stuff: " << eloss_total << " " << p.weight << " " << initial_p_t << " " << p.energy << std::endl; 
+        std::string specified_category = "csd_energy_loss";
+        for (auto &t : garage.tallies) {
+            if (t.tally_category == specified_category) {
+                // Check if this tally tracks this species
+                if (std::find(t.species.begin(), t.species.end(), p.species) != t.species.end()) {
+                    //std::cout << "here tally" << std::endl;
+                    t.add_smear(p.species, initial_p_t, p.t,  p.energy, p.energy-eloss_total, eloss_total*p.weight);
+                }
+            }
+        }
+        // ion energy dep
+        garage.standard_tallies[3].add("all", p.t, 0.1, eloss_total*p.weight);
+        // electron energy dep
+        garage.standard_tallies[4].add("e", p.t, 0.1, eloss_total*p.weight);
+
+        // adjust particle energy and speed
         p.energy -= eloss_total;
-        if (p.energy*1e3 < 1.5*local_material.ion_temperature){
-            particle_active = 0; // kill the particle if it thermalizes
-            // TODO: add the particle to the background
+        double particle_mass = species_2_mass(p.species);
+        p.speed = std::sqrt(2.0 * (p.energy*1e-3 * rtt_units::electronChargeSI * 1e6) / (particle_mass * 1.0e-3)) * 1.0e-8 * 1.0e2;
+        
+        // kill particle if thermalized
+        if (p.energy < 1.5*local_material.ion_temperature){
+            particle_active = 0; // kill the particle
+            for (int species_it = 0; species_it < local_material.species.size(); ++species_it) {
+                if (local_material.species[species_it] == p.species) {
+                    double background_modification = p.weight * species_2_mass(p.species);
+                    garage.materials[zone_index].densities[species_it] += background_modification;
+                }
+            }
         }
     }
 
     // if a particle reaches census, add it to the census_bank
     if (particle_active == 1) {
+        //std::cout << "censused particle" << std::endl;
         garage.census_bank.emplace_back(std::move(p));
     }
     // if a secondary is created, add it to the secondary_bank
@@ -180,13 +312,14 @@ void spitzer_csd(Particle& p, double& dedt_electron, double& dedx_electron, doub
     std::string projectile_species = p.species;
     double projectile_mass = species_2_mass(projectile_species);
     int32_t projectile_zaid = species_2_zaid(projectile_species);
-    double projectile_energy = p.energy * rtt_units::electronChargeSI * 1e6; // J
+    double projectile_energy = p.energy *1e-3 * rtt_units::electronChargeSI * 1e6; // J (the 1e-3 is to convert keV to MeV)
     double projectile_speed = p.speed;
 
     double background_molar_mass = compute_mixture_molar_mass(local_material.species, local_material.densities);
     garage.materials[zone_index].ion_molar_mass = background_molar_mass;
 
     double total_ion_density = 0; //  g/cc
+    double electron_density = 0; // g/cc * Z
 
     rtt_units::PhysicalConstexprs<rtt_units::CGS> pc;
     double keV = pc.eV()*1e3;
@@ -202,6 +335,8 @@ void spitzer_csd(Particle& p, double& dedt_electron, double& dedx_electron, doub
         }
         total_ion_density += ion_density;
 
+        electron_density += ion_density * species_2_z(ion_species);
+
         double ion_number_density = ion_density / background_molar_mass * rtt_units::AVOGADRO;
 
         auto const ion_model(std::make_shared<rtt_cdi_cpeloss::Analytic_Spitzer_Eloss_Model>(
@@ -211,35 +346,71 @@ void spitzer_csd(Particle& p, double& dedt_electron, double& dedx_electron, doub
 
         double dedt_temp = eloss_ion.getEloss(local_material.ion_temperature, ion_number_density, projectile_speed);
 
-        dedt_ion += dedt_temp;
-        dedx_ion += dedt_temp / (projectile_speed*1e8 * 1e-8/keV); // keV/cm?
+        dedt_ion += dedt_temp * ion_density;
+        dedx_ion += dedt_temp * ion_density / projectile_speed; //(projectile_speed*1e8 * 1e-8/keV); // keV/cm?
 
     }
 
+    dedt_ion /= total_ion_density;
+    dedx_ion /= total_ion_density;
+
     // electron slowing down
-    double electron_number_density = total_ion_density / background_molar_mass * rtt_units::AVOGADRO; // atoms/cc
-    double electron_mass = 9.1093837e-28;
+    double electron_number_density = electron_density / background_molar_mass * rtt_units::AVOGADRO; // atoms/cc
+    electron_number_density = 3.011e24; // FIX: kludge
+    std::string electron_species = "e";
+    double electron_mass = species_2_mass(electron_species);
     auto const electron_model(std::make_shared<rtt_cdi_cpeloss::Analytic_Spitzer_Eloss_Model>(
         -1, electron_mass, projectile_zaid, projectile_mass
     ));
     rtt_cdi_cpeloss::Analytic_CP_Eloss const eloss_electron(electron_model, rtt_cdi::CPModelAngleCutoff::NONE);
     dedt_electron = eloss_electron.getEloss(local_material.electron_temperature, electron_number_density, projectile_speed); // keV/shk
-    dedx_electron = dedt_electron / (projectile_speed*1e8 * 1e-8/keV);  // keV/cm?
+    dedx_electron = dedt_electron / projectile_speed; //(projectile_speed*1e8 * 1e-8/keV);  // keV/cm?
 
 }
 
 
-void source_particles(int t_it) {
+std::unordered_map<std::string, double>
+average_energy_by_species(const std::vector<Particle>& bank)
+{
+    std::unordered_map<std::string, double> sum_wE;
+    std::unordered_map<std::string, double> sum_w;
 
-    garage.active_bank.emplace_back(
-        garage.source_particle,
-        garage.source_point[0],
-        garage.source_point[1],
-        garage.source_point[2],
-        garage.source_time,
-        garage.source_energy,
-        1.0
-    );
+    for (const auto &p : bank) {
+        sum_wE[p.species] += p.weight * p.energy;
+        sum_w[p.species]  += p.weight;
+    }
+
+    std::unordered_map<std::string, double> avg;
+    avg.reserve(sum_w.size());
+    for (const auto &kv : sum_w) {
+        const std::string &sp = kv.first;
+        const double w = kv.second;
+        if (w > 0.0) {
+            avg[sp] = sum_wE[sp] / w;
+        }
+    }
+    return avg;
+}
+
+
+void source_particles(double time_start, double time_census) {
+    
+    double particle_weight = (garage.source_strength/garage.num_particles);
+
+    if (garage.source_time >= time_start && garage.source_time < time_census){ // this only works for point source in time
+        //std::cout << "sourced particle: " << time_start << " " << time_census << " " << garage.source_time << std::endl;
+        for (int source_it = 0; source_it < garage.num_particles; ++source_it){
+            garage.active_bank.emplace_back(
+                garage.source_particle,
+                garage.source_point[0],
+                garage.source_point[1],
+                garage.source_point[2],
+                garage.source_time,
+                garage.source_energy,
+                particle_weight
+            );
+        }
+    }
     
 }
 
@@ -284,4 +455,23 @@ void population_control() {
     double W_after = total_weight(v);
     const double scale = W_before / W_after;
     for (auto& p : v) p.weight *= scale;
+}
+
+
+void time_step_setup(std::string mode){
+    if (mode == "Uniform"){
+        double step_size = garage.t_step_size;
+        int num_steps = garage.num_t_steps;
+        double starting_point = 0.0;
+
+                // Create a vector of size num_steps + 1
+        std::vector<double> time_bins(num_steps + 1);
+
+        // Fill it with uniformly spaced values
+        for (int i = 0; i <= num_steps; ++i) {
+            time_bins[i] = starting_point + i * step_size;
+        }
+
+        garage.time_step_bins = time_bins;
+    }
 }

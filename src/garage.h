@@ -17,15 +17,19 @@ struct Garage {
     int    num_t_steps       = 0;
     double t_step_size       = 0.0;
     int    current_time_step = 0;   // initialize to 0
+    std::vector<double> time_step_bins;
 
     // Tallies
-    int    standard_tallies  = 0;
+    std::vector<Tally>    tallies;
+    std::vector<Tally> standard_tallies;
+    int total_particles_created = 0;
 
     // Source fields
     std::string         source_particle;        // e.g., "a"
     std::array<double,3> source_point{0.0,0.0,0.0}; // x,y,z
     double              source_time = 0.0;
     double              source_energy = 0.0;
+    double source_strength = 1; // particles/cc (per second if applicable)
 };
 
 extern Garage garage; // declaration only
