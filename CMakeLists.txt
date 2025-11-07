@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(test_0D_cp LANGUAGES C CXX Fortran)
+project(galvanize LANGUAGES C CXX Fortran)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -24,29 +24,30 @@ function(link_if_exists exe)
   endforeach()
 endfunction()
 
-add_executable(test_0D_cp
+add_executable(galvanize
   src/main.cpp
   src/loop.cpp
   src/utilities.cpp
+  src/io.cpp
 )
 
 if (TARGET hdf5::hdf5)
-  target_link_libraries(test_0D_cp PRIVATE hdf5::hdf5)
+  target_link_libraries(galvanize PRIVATE hdf5::hdf5)
 elseif (TARGET HDF5::HDF5)
-  target_link_libraries(test_0D_cp PRIVATE HDF5::HDF5)
+  target_link_libraries(galvanize PRIVATE HDF5::HDF5)
 else()
   # Legacy FindHDF5 variables
-  target_include_directories(test_0D_cp PRIVATE ${HDF5_INCLUDE_DIRS})
+  target_include_directories(galvanize PRIVATE ${HDF5_INCLUDE_DIRS})
   if (HDF5_C_LIBRARIES)
-    target_link_libraries(test_0D_cp PRIVATE ${HDF5_C_LIBRARIES})
+    target_link_libraries(galvanize PRIVATE ${HDF5_C_LIBRARIES})
   else()
-    target_link_libraries(test_0D_cp PRIVATE ${HDF5_LIBRARIES})
+    target_link_libraries(galvanize PRIVATE ${HDF5_LIBRARIES})
   endif()
 endif()
 
 # Link against all Draco library targets present in the file (skip Exe_*).
-# (Order here doesn’t matter—CMake handles transitive links via imported target metadata.)
-link_if_exists(test_0D_cp
+# (Order here doesnï¿½t matterï¿½CMake handles transitive links via imported target metadata.)
+link_if_exists(galvanize
   coverage_config
   Lib_dsxx
   Lib_c4
@@ -83,12 +84,12 @@ link_if_exists(test_0D_cp
 # (We intentionally do NOT link imported executables:)
 # Exe_xthi Exe_ythi Exe_Ipcress_Interpreter Exe_draco_info Exe_CSKrw
 
-# Optional: set an rpath so your built binary can find Draco’s .so without LD_LIBRARY_PATH
+# Optional: set an rpath so your built binary can find Dracoï¿½s .so without LD_LIBRARY_PATH
 # (adjust lib vs lib64 to match your install)
-set_target_properties(test_0D_cp PROPERTIES
+set_target_properties(galvanize PROPERTIES
   BUILD_RPATH "$ENV{HOME}/lifft/draco_install/lib;$ENV{HOME}/lifft/draco_install/lib64"
   INSTALL_RPATH "$ENV{HOME}/lifft/draco_install/lib;$ENV{HOME}/lifft/draco_install/lib64"
 )
 
 # If you later install this project:
-# install(TARGETS test_0D_cp RUNTIME DESTINATION bin)
+# install(TARGETS galvanize RUNTIME DESTINATION bin)
