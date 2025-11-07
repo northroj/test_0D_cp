@@ -16,11 +16,15 @@ Defines the physical and compositional properties of the simulation material.
 
 ### Example
 
-```ini
+
 [materials]
+
 ion_temperature 25
+
 electron_temperature 25
+
 particles d t a
+
 densities 5.0 5.0 0.0
+
 mat_id 1
-```
