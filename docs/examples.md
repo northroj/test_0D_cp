@@ -1,3 +1,5 @@
+```markdown
+
 # Example: Full Input File
 
 Below is a complete example input file combining all sections.

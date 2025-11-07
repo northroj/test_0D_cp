@@ -39,6 +39,6 @@ It will run and create an output hdf5 file called example_basic.h5 (use the -o f
 
 ## Input explanation
 
-
+Check out https://northroj.github.io/galvanize/ for the user documentation on input formatting (work in progress)
 
 

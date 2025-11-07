@@ -1,3 +1,5 @@
+```markdown
+
 # [source]
 
 Defines the initial particle source conditions for the simulation.
@@ -13,6 +15,7 @@ Defines the initial particle source conditions for the simulation.
 ---
 
 ### Example
+
 ```ini
 [source]
 particle a

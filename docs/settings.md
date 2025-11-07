@@ -1,3 +1,5 @@
+```markdown
+
 # [settings]
 
 Controls global simulation settings and run-time parameters.

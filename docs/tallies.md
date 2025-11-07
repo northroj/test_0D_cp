@@ -1,3 +1,5 @@
+```markdown
+
 # [tallies]
 
 Specifies diagnostic tallies to record quantities such as energy deposition, particle counts, or flux spectra.
