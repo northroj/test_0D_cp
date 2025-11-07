@@ -23,3 +23,4 @@ electron_temperature 25
 particles d t a
 densities 5.0 5.0 0.0
 mat_id 1
+```
