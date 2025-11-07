@@ -1,0 +1,28 @@
+site_name: Galvanize Input Reference
+site_url: https://northroj.github.io/galvanize
+repo_url: https://github.com/northroj/galvanize
+theme:
+  name: material
+  logo: misc/0076Golem-Alola.png   # optional; can omit
+  features:
+    - navigation.expand
+    - navigation.tabs
+    - search.highlight
+    - search.suggest
+    - toc.integrate
+nav:
+  - Home: index.md
+  - Input Sections:
+      - Materials: materials.md
+      - Source: source.md
+      - Tallies: tallies.md
+      - Settings: settings.md
+  - Examples: examples.md
+markdown_extensions:
+  - admonition
+  - codehilite
+  - toc:
+      permalink: true
+  - tables
+plugins:
+  - search

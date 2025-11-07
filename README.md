@@ -36,3 +36,9 @@ To run:
 It will run and create an output hdf5 file called example_basic.h5 (use the -o flag to specify an output name)
 
 
+
+## Input explanation
+
+
+
+

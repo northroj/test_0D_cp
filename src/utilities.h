@@ -8,6 +8,7 @@
 // ---------- classes ----------
 class Material {
 public:
+    int mat_id = -1;
     double ion_temperature      = 0.0;
     double electron_temperature = 0.0;
     double ion_molar_mass = 0.0;
@@ -116,6 +117,23 @@ public:
                       std::vector<double> energy_edges,
                       std::vector<double> time_edges,
                       std::string category);
+
+};
+
+
+// ------------------------ Geometry ------------------------------------------
+
+class MeshCell {
+public:
+    int cell_id;
+
+    Material cell_material;
+
+    std::vector<double> surface_bounds; // [-x, +x, -y, +y, -z, +z] position of boundaries
+    std::vector<double> boundary_conditions; 
+
+    MeshCell() = default;
+    explicit MeshCell(int id) : cell_id(id) {}
 
 };
 

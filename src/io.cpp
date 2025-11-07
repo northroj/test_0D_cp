@@ -14,9 +14,6 @@
 #include "garage.h"
 #include "io.h"
 
-// Toolchain check header; not used yet
-#include "cdi_CPEloss/Tabular_CP_Eloss.hh"
-
 // HDF5 C API is a C library; wrap in extern "C" for C++ builds
 extern "C" {
 #include <hdf5.h>
@@ -83,6 +80,46 @@ static bool parse_bins_spec(const std::vector<std::string>& tok,
     return true;
 }
 
+static bool is_number(const std::string &s) {
+    char* end=nullptr;
+    std::strtod(s.c_str(), &end);
+    return end && *end=='\0';
+}
+
+// Accept either:
+//   x <lo> <hi> <divs> <lin|log>
+// or
+//   x v0 v1 v2 ... vN   (N>=1; strictly increasing)
+static bool parse_axis_edges(const std::vector<std::string>& tok, std::vector<double>& out_edges) {
+    if (tok.size() < 3) return false;
+
+    // Heuristic: if there are exactly 5 tokens and the 5th is lin/log, treat as bins-spec.
+    if (tok.size() == 5) {
+        std::string last = tok[4];
+        for (auto &c : last) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (last=="lin" || last=="log" || last=="log10" || last=="logspace") {
+            return parse_bins_spec(tok, out_edges);
+        }
+    }
+
+    // Otherwise treat as explicit edge list: x v0 v1 ...
+    out_edges.clear();
+    out_edges.reserve(tok.size()-1);
+    for (size_t i=1;i<tok.size();++i) {
+        if (!is_number(tok[i])) return false;
+        out_edges.push_back(std::stod(tok[i]));
+    }
+    if (out_edges.size() < 2) return false;
+    // verify strictly increasing
+    for (size_t i=1;i<out_edges.size();++i) {
+        if (!(out_edges[i] > out_edges[i-1])) {
+            std::cerr << "ERROR: geometry axis edges must be strictly increasing.\n";
+            return false;
+        }
+    }
+    return true;
+}
+
 // ----------------------------- Input parsing --------------------------------
 
 bool parse_input_file(const std::filesystem::path& path) {
@@ -92,7 +129,7 @@ bool parse_input_file(const std::filesystem::path& path) {
         return false;
     }
 
-    enum class Section { None, Materials, Source, Tallies, Settings };
+    enum class Section { None, Materials, Source, Tallies, Geometry, Settings };
     Section sec = Section::None;
 
     Material mat;         bool mat_active   = false;
@@ -132,6 +169,7 @@ bool parse_input_file(const std::filesystem::path& path) {
             if      (name == "materials") sec = Section::Materials;
             else if (name == "source")    sec = Section::Source;
             else if (name == "tallies")   sec = Section::Tallies;
+            else if (name == "geometry")  sec = Section::Geometry;
             else if (name == "settings")  sec = Section::Settings;
             else                          sec = Section::None;
             continue;
@@ -159,6 +197,8 @@ bool parse_input_file(const std::filesystem::path& path) {
                     for (size_t i = 1; i < tok.size(); ++i)
                         mat.densities.push_back(std::stod(tok[i]));
                     mat_active = true;
+                } else if (tok[0] == "mat_id" && tok.size() == 2) {
+                    mat.mat_id = std::stod(tok[1]);
                 } else {
                     std::cerr << "WARN: Unrecognized materials line: " << line << "\n";
                 }

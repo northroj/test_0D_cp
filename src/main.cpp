@@ -33,6 +33,12 @@ int main(int argc, char** argv) try {
     // allocate particle banks
     plan_particle_capacity_after_parse();
 
+    // create the geometry
+    if (!build_cartesian_mesh_after_parse()) {
+        std::cerr << "ERROR: geometry build failed.\n";
+        return EXIT_FAILURE;
+    }
+
     std::cout << "Running <insert_code_name> simulation\n";
     const auto t0_sim = clock_t::now();
     simulate();
