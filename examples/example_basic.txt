@@ -3,6 +3,14 @@ ion_temperature 25
 electron_temperature 25
 particles d t a
 densities 5.0 5.0 0.0
+mat_id 1
+
+[geometry]
+x -0.5 0.0 0.5 1.0
+y 0 1 2 3
+z 0 0.5 1.0
+fill 1
+block 1 2   0 2   0 1   2
 
 [source]
 particle a
