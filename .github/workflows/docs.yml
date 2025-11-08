@@ -18,6 +18,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 10   # hard stop after 10 minutes
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

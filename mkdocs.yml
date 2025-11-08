@@ -3,7 +3,7 @@ site_url: https://northroj.github.io/galvanize
 repo_url: https://github.com/northroj/galvanize
 theme:
   name: material
-  logo: misc/0076Golem-Alola.png   # optional; can omit
+  logo: assets/0076Golem-Alola.png   # optional; can omit
   features:
     - navigation.expand
     - navigation.tabs
@@ -17,6 +17,7 @@ nav:
       - Source: source.md
       - Tallies: tallies.md
       - Settings: settings.md
+      - Geometry: geometry.md
   - Examples: examples.md
 markdown_extensions:
   - admonition
