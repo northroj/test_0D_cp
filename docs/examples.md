@@ -2,7 +2,7 @@
 
 Below is a complete example input file combining all sections.
 
-
+```ini
 
 [materials]
 
@@ -37,3 +37,5 @@ time_bins timesteps
 num_particles 1000
 num_t_steps 100
 t_step_size 0.0001
+
+```

@@ -12,10 +12,11 @@ Controls global simulation settings and run-time parameters. This block is not r
 
 ### Example
 
+```ini
+
 [settings]
-
 num_particles 1000
-
 num_t_steps 100
-
 t_step_size 0.0001
+
+```

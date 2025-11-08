@@ -14,15 +14,13 @@ Defines the initial particle source conditions for the simulation.
 
 ### Example
 
+```ini
 
 [source]
-
 particle a
-
 point 0.0 0.0 0.0
-
 time 0.0
-
 energy 3500.0
-
 strength 1e18
+
+```

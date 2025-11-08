@@ -17,14 +17,13 @@ Defines a cartesian mesh for the geometry (just one large x,y,z grid).
 
 ### Example
 
+```ini
+
 [geometry]
-
 x -1.0 -0.5 0.0 0.5 1.0
-
 y 0.0 1.0 63 lin
-
 z 1e-3 1.0 16 log
-
 fill 1
-
 block 10 20 0 10 0 5 2
+
+```
