@@ -20,6 +20,47 @@ extern "C" {
 }
 
 
+// ----  (file-scope) ----
+struct PaintBlock {
+    int ix0, ix1, iy0, iy1, iz0, iz1;
+    int mat_id;
+};
+static bool g_have_default_fill = false;
+static int  g_default_fill = -1;
+static std::vector<PaintBlock> g_paints;
+
+
+inline bool mesh_ready(const Garage& g) {
+    return g.nx>0 && g.ny>0 && g.nz>0 && g.mesh_cells.size()==static_cast<size_t>(g.nx*g.ny*g.nz);
+}
+
+inline size_t mesh_flatten(const Garage& g, int ix, int iy, int iz) {
+    // row-major with x fastest
+    return static_cast<size_t>(ix)
+         + static_cast<size_t>(iy) * g.mesh_strides[1]
+         + static_cast<size_t>(iz) * g.mesh_strides[2];
+}
+
+inline void mesh_unflatten(const Garage& g, size_t id, int &ix, int &iy, int &iz) {
+    iz = static_cast<int>(id / g.mesh_strides[2]);
+    size_t r = id % g.mesh_strides[2];
+    iy = static_cast<int>(r / g.mesh_strides[1]);
+    ix = static_cast<int>(r % g.mesh_strides[1]);
+}
+
+inline bool mesh_in_bounds(const Garage& g, int ix, int iy, int iz) {
+    return (ix>=0 && ix<g.nx) && (iy>=0 && iy<g.ny) && (iz>=0 && iz<g.nz);
+}
+
+// neighbor: axis a∈{0:x,1:y,2:z}, step s∈{-1,+1}; returns -1 if off-domain
+inline int mesh_neighbor_id(const Garage& g, int cell_id, int a, int s) {
+    int ix,iy,iz;
+    mesh_unflatten(g, static_cast<size_t>(cell_id), ix, iy, iz);
+    if (a==0) ix += s; else if (a==1) iy += s; else iz += s;
+    if (!mesh_in_bounds(g, ix, iy, iz)) return -1;
+    return static_cast<int>(mesh_flatten(g, ix, iy, iz));
+}
+
 // ------------------------ Parsing helpers (file-local) ----------------------
 
 static std::string trim(std::string s) {
@@ -117,6 +158,107 @@ static bool parse_axis_edges(const std::vector<std::string>& tok, std::vector<do
             return false;
         }
     }
+    return true;
+}
+
+bool build_cartesian_mesh_after_parse() {
+    // Validate edges
+    if (garage.x_bin_bounds.size()<2 || garage.y_bin_bounds.size()<2 || garage.z_bin_bounds.size()<2) {
+        std::cerr << "ERROR: geometry requires x,y,z with at least two edges each.\n";
+        return false;
+    }
+    auto check_increasing = [](const std::vector<double>& e, const char* name)->bool{
+        for (size_t i=1;i<e.size();++i) if (!(e[i]>e[i-1])) {
+            std::cerr << "ERROR: " << name << " edges must be strictly increasing.\n";
+            return false;
+        }
+        return true;
+    };
+    if (!check_increasing(garage.x_bin_bounds,"x") ||
+        !check_increasing(garage.y_bin_bounds,"y") ||
+        !check_increasing(garage.z_bin_bounds,"z")) return false;
+
+    garage.nx = static_cast<int>(garage.x_bin_bounds.size()) - 1;
+    garage.ny = static_cast<int>(garage.y_bin_bounds.size()) - 1;
+    garage.nz = static_cast<int>(garage.z_bin_bounds.size()) - 1;
+
+    const size_t ncell = static_cast<size_t>(garage.nx)*garage.ny*garage.nz;
+    garage.mesh_strides[0] = 1;
+    garage.mesh_strides[1] = static_cast<size_t>(garage.nx);
+    garage.mesh_strides[2] = static_cast<size_t>(garage.nx)*garage.ny;
+
+    for (int iz=0; iz<garage.nz; ++iz) {
+      for (int iy=0; iy<garage.ny; ++iy) {
+        for (int ix=0; ix<garage.nx; ++ix) {
+            const size_t id = mesh_flatten(garage, ix, iy, iz);
+            MeshCell cell(static_cast<int>(id));
+            cell.surface_bounds.resize(6);
+            cell.boundary_conditions.resize(6, -1);
+
+            cell.surface_bounds[0] = garage.x_bin_bounds[ix];
+            cell.surface_bounds[1] = garage.x_bin_bounds[ix+1];
+            cell.surface_bounds[2] = garage.y_bin_bounds[iy];
+            cell.surface_bounds[3] = garage.y_bin_bounds[iy+1];
+            cell.surface_bounds[4] = garage.z_bin_bounds[iz];
+            cell.surface_bounds[5] = garage.z_bin_bounds[iz+1];
+
+            // -x, +x
+            cell.boundary_conditions[0] = mesh_in_bounds(garage, ix-1,iy,iz) ? static_cast<int>(mesh_flatten(garage, ix-1,iy,iz)) : -1;
+            cell.boundary_conditions[1] = mesh_in_bounds(garage, ix+1,iy,iz) ? static_cast<int>(mesh_flatten(garage, ix+1,iy,iz)) : -1;
+            // -y, +y
+            cell.boundary_conditions[2] = mesh_in_bounds(garage, ix,iy-1,iz) ? static_cast<int>(mesh_flatten(garage, ix,iy-1,iz)) : -1;
+            cell.boundary_conditions[3] = mesh_in_bounds(garage, ix,iy+1,iz) ? static_cast<int>(mesh_flatten(garage, ix,iy+1,iz)) : -1;
+            // -z, +z
+            cell.boundary_conditions[4] = mesh_in_bounds(garage, ix,iy,iz-1) ? static_cast<int>(mesh_flatten(garage, ix,iy,iz-1)) : -1;
+            cell.boundary_conditions[5] = mesh_in_bounds(garage, ix,iy,iz+1) ? static_cast<int>(mesh_flatten(garage, ix,iy,iz+1)) : -1;
+
+            garage.mesh_cells[id] = std::move(cell);
+        }
+      }
+    }
+
+    // painting loops: same change
+    for (const auto &pb : g_paints) {
+        int ix0 = clamp(pb.ix0, 0, garage.nx);
+        int ix1 = clamp(pb.ix1, 0, garage.nx);
+        int iy0 = clamp(pb.iy0, 0, garage.ny);
+        int iy1 = clamp(pb.iy1, 0, garage.ny);
+        int iz0 = clamp(pb.iz0, 0, garage.nz);
+        int iz1 = clamp(pb.iz1, 0, garage.nz);
+        for (int iz=iz0; iz<iz1; ++iz)
+          for (int iy=iy0; iy<iy1; ++iy)
+            for (int ix=ix0; ix<ix1; ++ix) {
+                size_t id = mesh_flatten(garage, ix, iy, iz);
+                garage.mesh_mat_ids[id] = pb.mat_id;
+            }
+    }
+
+
+    // Optionally resolve cell_material for each MeshCell from mat_id table
+    // If you prefer to keep only mat_id per cell, you can skip this resolve and
+    // look up materials by mat_id at usage sites.
+    auto find_material_by_id = [&](int mid)->const Material*{
+        for (const auto &m : garage.materials) {
+            // you stored mat_id as a double; cast to int safely
+            int im = static_cast<int>(std::llround(m.mat_id));
+            if (im == mid) return &m;
+        }
+        return nullptr;
+    };
+    for (size_t id=0; id<ncell; ++id) {
+        int mid = garage.mesh_mat_ids[id];
+        if (mid >= 0) {
+            if (const Material* mp = find_material_by_id(mid)) {
+                garage.mesh_cells[id].cell_material = *mp; // copy now; or store pointer if you prefer
+            } else {
+                std::cerr << "WARN: mat_id " << mid << " not found in [materials]; cell " << id << " left default.\n";
+            }
+        }
+    }
+
+    // clear paint staging for next parse
+    g_have_default_fill = false; g_default_fill = -1; g_paints.clear();
+
     return true;
 }
 
@@ -263,6 +405,32 @@ bool parse_input_file(const std::filesystem::path& path) {
                 } else {
                     std::cerr << "WARN: Unrecognized settings line: " << line << "\n";
                 }            
+            } break;
+
+            case Section::Geometry: {
+                if (tok[0] == "x") {
+                    if (!parse_axis_edges(tok, garage.x_bin_bounds)) { std::cerr << "ERROR: bad x edges spec: " << line << "\n"; return false; }
+                } else if (tok[0] == "y") {
+                    if (!parse_axis_edges(tok, garage.y_bin_bounds)) { std::cerr << "ERROR: bad y edges spec: " << line << "\n"; return false; }
+                } else if (tok[0] == "z") {
+                    if (!parse_axis_edges(tok, garage.z_bin_bounds)) { std::cerr << "ERROR: bad z edges spec: " << line << "\n"; return false; }
+                } else if (tok[0] == "fill" && tok.size()==2) {
+                    g_have_default_fill = true;
+                    g_default_fill = std::stoi(tok[1]);
+                } else if (tok[0] == "block" && tok.size()==8) {
+                    PaintBlock pb;
+                    pb.ix0 = std::stoi(tok[1]); pb.ix1 = std::stoi(tok[2]);
+                    pb.iy0 = std::stoi(tok[3]); pb.iy1 = std::stoi(tok[4]);
+                    pb.iz0 = std::stoi(tok[5]); pb.iz1 = std::stoi(tok[6]);
+                    pb.mat_id = std::stoi(tok[7]);
+                    if (!(pb.ix0<=pb.ix1 && pb.iy0<=pb.iy1 && pb.iz0<=pb.iz1)) {
+                        std::cerr << "ERROR: block ranges must be non-decreasing.\n";
+                        return false;
+                    }
+                    g_paints.push_back(pb);
+                } else {
+                    std::cerr << "WARN: Unrecognized geometry line: " << line << "\n";
+                }
             } break;
 
             case Section::None:

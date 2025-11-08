@@ -1,8 +1,6 @@
-```markdown
-
 # [settings]
 
-Controls global simulation settings and run-time parameters.
+Controls global simulation settings and run-time parameters. This block is not repeatable.
 
 | Field | Type | Description |
 |--------|------|-------------|
@@ -13,8 +11,11 @@ Controls global simulation settings and run-time parameters.
 ---
 
 ### Example
-```ini
+
 [settings]
+
 num_particles 1000
+
 num_t_steps 100
+
 t_step_size 0.0001

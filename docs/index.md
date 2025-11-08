@@ -1,8 +1,7 @@
 # Galvanize Input Reference
 
-This site documents the input format used by **Galvanize**, a 3D Monte Carlo and radiation transport code.
+This site documents the input format used by **Galvanize**, a Monte Carlo charged particle transport code.
 
-Each section of the input file (e.g. `[materials]`, `[source]`, `[tallies]`, `[settings]`) is documented separately for clarity.
 
 ---
 
@@ -11,4 +10,5 @@ Each section of the input file (e.g. `[materials]`, `[source]`, `[tallies]`, `[s
 - [Source](source.md)
 - [Tallies](tallies.md)
 - [Settings](settings.md)
+- [Geometry](geometry.md)
 - [Examples](examples.md)

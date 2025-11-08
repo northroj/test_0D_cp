@@ -1,5 +1,3 @@
-```markdown
-
 # [tallies]
 
 Specifies diagnostic tallies to record quantities such as energy deposition, particle counts, or flux spectra.
@@ -17,16 +15,27 @@ Each `[tallies]` block defines one independent tally.
 ---
 
 ### Example
-```ini
-[tallies]
-name test_tally_1
-category csd_energy_loss
-particles d t a
-energy_bins 0 10000 99 lin
-time_bins 0 0.01 99 lin
 
 [tallies]
+
+name test_tally_1
+
+category csd_energy_loss
+
+particles d t a
+
+energy_bins 0 10000 99 lin
+
+time_bins 0 0.01 99 lin
+
+
+
+[tallies]
+
 name test_tally_2
+
 category average_particle_energy
+
 particles a
+
 time_bins timesteps

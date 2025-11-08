@@ -1,12 +1,13 @@
-```markdown
-
 # Example: Full Input File
 
 Below is a complete example input file combining all sections.
 
-```ini
+
+
 [materials]
+
 ion_temperature 25
+
 electron_temperature 25
 particles d t a
 densities 5.0 5.0 0.0

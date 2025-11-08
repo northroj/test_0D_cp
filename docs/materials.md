@@ -1,8 +1,6 @@
-```markdown
-
 # [materials]
 
-Defines the physical and compositional properties of the simulation material.
+Defines the initial state of a material that can be used to fill a mesh cell. The [materials] block is repeatable to define multiple materials.
 
 | Field | Type | Description |
 |--------|------|-------------|
@@ -16,15 +14,13 @@ Defines the physical and compositional properties of the simulation material.
 
 ### Example
 
+```ini
 
 [materials]
-
 ion_temperature 25
-
 electron_temperature 25
-
 particles d t a
-
 densities 5.0 5.0 0.0
-
 mat_id 1
+
+```
