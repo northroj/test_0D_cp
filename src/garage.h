@@ -7,6 +7,12 @@
 #include <cstddef>
 
 struct Garage {
+
+    // RNG system
+    R123Rng rng;
+    // optional seed to initialize RNG
+    uint64_t rng_seed = 123456789u;
+
     // Categories
     std::vector<Material> materials;
     std::vector<Particle> active_bank;
@@ -31,6 +37,7 @@ struct Garage {
     double t_step_size       = 0.0;
     int    current_time_step = 0;   // initialize to 0
     std::vector<double> time_step_bins;
+    int lost_particles = 0;
 
     // Tallies
     std::vector<Tally>    tallies;
@@ -42,6 +49,7 @@ struct Garage {
     std::array<double,3> source_point{0.0,0.0,0.0}; // x,y,z
     double              source_time = 0.0;
     double              source_energy = 0.0;
+    std::array<double,3> source_direction{1.0,0.0,0.0};
     double source_strength = 1; // particles/cc (per second if applicable)
 };
 

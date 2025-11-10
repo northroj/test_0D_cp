@@ -9,6 +9,7 @@ Defines the initial particle source conditions for the simulation.
 | `time` | float | Emission time in shakes |
 | `energy` | float | Initial particle energy (keV or MeV, depending on code units) |
 | `strength` | float | Number of particles emitted (or energy-weighted source strength) |
+| `direction` | 3 floats | x,y,z vector for the beam direction (normalized internally) |
 
 ---
 
@@ -22,5 +23,6 @@ point 0.0 0.0 0.0
 time 0.0
 energy 3500.0
 strength 1e18
+direction 1.0 0.0 0.0
 
 ```

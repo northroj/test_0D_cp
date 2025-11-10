@@ -9,6 +9,10 @@
 #include <iostream>
 #include <numeric>
 #include <cstdint>
+#include <atomic>
+
+#include <Random123/philox.h>
+#include <Random123/uniform.hpp>
 
 //Draco includes
 #include "cdi_CPEloss/Analytic_CP_Eloss.hh"
@@ -207,6 +211,19 @@ void transport_particle(Particle& p, double time_census) {
 
         double initial_p_t = p.t;
 
+        // distance to boundary
+        BoundaryCross boundary_cross;
+        double dist_boundary = 1e20;
+        if (distance_to_boundary(p, boundary_cross)) {
+            dist_boundary = boundary_cross.distance;
+        } else {
+            garage.lost_particles++;
+            particle_active = 0;
+        }
+        
+        double dist_census = t_remaining * (dedt_electron + dedt_ion) / (dedx_electron + dedx_ion);
+        double dist_csd = csd_step * p.energy / (dedx_electron + dedx_ion);
+
         double eloss_total = 0.0;
         if (t_remaining > t_eloss){ // if the full step can be taken
             //std::cout << "made a complete step" << std::endl;
@@ -270,37 +287,80 @@ void transport_particle(Particle& p, double time_census) {
     
 }
 
-
-void kp_alpha_csd(Particle& p) {
-
-    int zone_index = p.zone;
-    
-    Material local_material = garage.materials[zone_index];
-    int num_background_species = local_material.species.size();
-
-    // Single background species, whatever is listed first in the input
-    std::string ion_species = local_material.species[0];
-    int32_t ion_zaid = species_2_zaid(ion_species);
-    double ion_mass = species_2_mass(ion_species);
-
-    // projectile values
-    std::string projectile_species = p.species;
-    int32_t projectile_zaid = species_2_zaid(projectile_species);
-    double projectile_mass = species_2_mass(projectile_species);
-
-    // KP for alphas slowing down in d + t
-    auto const model_in(std::make_shared<rtt_cdi_cpeloss::Analytic_KP_Alpha_Eloss_Model>(
-      ion_zaid, ion_mass, projectile_zaid, projectile_mass));
-    rtt_cdi_cpeloss::Analytic_CP_Eloss const eloss_mod(model_in, rtt_cdi::CPModelAngleCutoff::NONE);
-    
-    double eloss_coeff = eloss_mod.getEloss(
-        local_material.ion_temperature, // keV
-        local_material.densities[0] / ion_mass, // [g/cc]/[g/atom] = atoms/cc
-        1.0 // cm/shk
-    );
-
-
+static inline bool valid_zone(int zone) {
+    return zone >= 0 && zone < static_cast<int>(garage.mesh_cells.size());
 }
+
+bool distance_to_boundary(const Particle& p, BoundaryCross& out) {
+    out.distance  = 0.0;
+    out.face      = -1;
+    out.next_zone = -1;
+
+    if (!valid_zone(p.zone)) return false;
+
+    const MeshCell& cell = garage.mesh_cells[p.zone];
+    if (cell.surface_bounds.size() < 6 || cell.boundary_conditions.size() < 6) return false;
+
+    const double x = p.x, y = p.y, z = p.z;
+    const double ux = p.dir.ux, uy = p.dir.uy, uz = p.dir.uz;
+
+    const double xlo = cell.surface_bounds[0];
+    const double xhi = cell.surface_bounds[1];
+    const double ylo = cell.surface_bounds[2];
+    const double yhi = cell.surface_bounds[3];
+    const double zlo = cell.surface_bounds[4];
+    const double zhi = cell.surface_bounds[5];
+
+    // Tiny tolerance to avoid “zero step” stalling when starting exactly on a plane.
+    const double eps_len = 1e-12 * std::max({std::abs(xhi - xlo), std::abs(yhi - ylo), std::abs(zhi - zlo), 1.0});
+    const double INF = std::numeric_limits<double>::infinity();
+
+    // Time to planes along each axis; use half-open cells [lo, hi), but
+    // allow exact max-edge to go to the +face.
+    double tx = INF, ty = INF, tz = INF;
+    int f_x = -1, f_y = -1, f_z = -1;
+
+    if (ux > 0.0)        { tx = (xhi - x) / ux; f_x = 1; }  // +x face (index 1)
+    else if (ux < 0.0)   { tx = (xlo - x) / ux; f_x = 0; }  // -x face (index 0)
+
+    if (uy > 0.0)        { ty = (yhi - y) / uy; f_y = 3; }  // +y face (index 3)
+    else if (uy < 0.0)   { ty = (ylo - y) / uy; f_y = 2; }  // -y face (index 2)
+
+    if (uz > 0.0)        { tz = (zhi - z) / uz; f_z = 5; }  // +z face (index 5)
+    else if (uz < 0.0)   { tz = (zlo - z) / uz; f_z = 4; }  // -z face (index 4)
+
+    // Only positive forward intersections count.
+    if (!(tx > eps_len)) tx = INF;
+    if (!(ty > eps_len)) ty = INF;
+    if (!(tz > eps_len)) tz = INF;
+
+    // Pick the smallest positive distance; tie-breaker order x < y < z.
+    double tmin = tx; int face = f_x;
+    if (ty < tmin) { tmin = ty; face = f_y; }
+    if (tz < tmin) { tmin = tz; face = f_z; }
+
+    if (!std::isfinite(tmin)) return false; // no forward hit (e.g., dir==0 or already out)
+
+    // Pull neighbor / boundary code from the cell
+    // Note: your MeshCell.boundary_conditions was shown as vector<double>;
+    // cast to int to interpret cell IDs / codes.
+    int next_zone = -1;
+    {
+        double bc_val = cell.boundary_conditions[face];
+        // Clamp to int safely
+        if (bc_val > static_cast<double>(std::numeric_limits<int>::max()))
+            bc_val = static_cast<double>(std::numeric_limits<int>::max());
+        if (bc_val < static_cast<double>(std::numeric_limits<int>::min()))
+            bc_val = static_cast<double>(std::numeric_limits<int>::min());
+        next_zone = static_cast<int>(bc_val);
+    }
+
+    out.distance  = tmin;
+    out.face      = face;
+    out.next_zone = next_zone;
+    return true;
+}
+
 
 void spitzer_csd(Particle& p, double& dedt_electron, double& dedx_electron, double& dedt_ion, double& dedx_ion){
 
@@ -400,15 +460,29 @@ void source_particles(double time_start, double time_census) {
     if (garage.source_time >= time_start && garage.source_time < time_census){ // this only works for point source in time
         //std::cout << "sourced particle: " << time_start << " " << time_census << " " << garage.source_time << std::endl;
         for (int source_it = 0; source_it < garage.num_particles; ++source_it){
-            garage.active_bank.emplace_back(
-                garage.source_particle,
-                garage.source_point[0],
-                garage.source_point[1],
-                garage.source_point[2],
-                garage.source_time,
-                garage.source_energy,
-                particle_weight
-            );
+            Particle p;
+            p.species = garage.source_particle;
+            // location
+            p.x = garage.source_point[0];
+            p.y = garage.source_point[1];
+            p.z = garage.source_point[2];
+            // direction
+            p.dir.ux = garage.source_direction[0];
+            p.dir.uy = garage.source_direction[1];
+            p.dir.uz = garage.source_direction[2];
+            p.dir.normalize();
+            // other
+            p.t = garage.source_time;
+            p.energy = garage.source_energy;
+            p.weight = particle_weight;
+            double projectile_mass = species_2_mass(p.species);
+            p.speed = particle_energy_2_speed(p.energy, projectile_mass);
+            p.zone = locate_cell_id(p.x, p.y, p.z);
+            p.start_particle_rng();
+            p.id = garage.total_particles_created;
+            garage.total_particles_created++;
+            
+            garage.active_bank.emplace_back(p);
         }
     }
     
@@ -474,4 +548,53 @@ void time_step_setup(std::string mode){
 
         garage.time_step_bins = time_bins;
     }
+}
+
+
+
+// Find axis index i such that value ∈ [edges[i], edges[i+1])
+// Special-case: if value == edges.back(), return last cell (size-2).
+// Returns -1 if value is outside [edges.front(), edges.back()].
+static inline int find_axis_index(const std::vector<double> &edges, double value) {
+    const size_t n = edges.size();
+    if (n < 2) return -1; // no cells
+    if (value < edges.front() || value > edges.back()) return -1;
+    if (value == edges.back()) return static_cast<int>(n) - 2;
+
+    auto it = std::upper_bound(edges.begin(), edges.end(), value);
+    int i = static_cast<int>(it - edges.begin()) - 1;
+    // i is now in [0, n-2] if value is inside
+    if (i < 0 || i >= static_cast<int>(n) - 1) return -1;
+    return i;
+}
+
+bool locate_cell_indices(double x, double y, double z, int &ix, int &iy, int &iz) {
+    // Require a built mesh
+    if (garage.x_bin_bounds.size() < 2 ||
+        garage.y_bin_bounds.size() < 2 ||
+        garage.z_bin_bounds.size() < 2 ||
+        garage.nx <= 0 || garage.ny <= 0 || garage.nz <= 0) {
+        return false;
+    }
+
+    ix = find_axis_index(garage.x_bin_bounds, x);
+    if (ix < 0) return false;
+    iy = find_axis_index(garage.y_bin_bounds, y);
+    if (iy < 0) return false;
+    iz = find_axis_index(garage.z_bin_bounds, z);
+    if (iz < 0) return false;
+
+    return true;
+}
+
+int locate_cell_id(double x, double y, double z) {
+    int ix, iy, iz;
+    if (!locate_cell_indices(x, y, z, ix, iy, iz)) return -1;
+
+    // Row-major with x fastest:
+    // id = ix + iy*nx + iz*(nx*ny)
+    const int nx = garage.nx;
+    const int ny = garage.ny;
+    // (nx, ny, nz were set during mesh build)
+    return ix + iy * nx + iz * (nx * ny);
 }

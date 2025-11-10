@@ -17,6 +17,57 @@ extern "C" {
 }
 
 
+
+// -------------------- R123Rng Implementation --------------------
+
+R123Rng::R123Rng() {
+    reseed(0, 0);
+}
+
+R123Rng::R123Rng(uint64_t seed, uint64_t stream) {
+    reseed(seed, stream);
+}
+
+void R123Rng::reseed(uint64_t seed, uint64_t stream) {
+    key = key_type{{static_cast<uint32_t>(seed & 0xffffffffu),
+                    static_cast<uint32_t>(seed >> 32)}};
+    ctr = ctr_type{{static_cast<uint32_t>(stream & 0xffffffffu),
+                    static_cast<uint32_t>(stream >> 32),
+                    0u, 0u}};
+    buf_index = 4;
+}
+
+void R123Rng::increment() {
+    if (++ctr[0] == 0u) {
+        if (++ctr[1] == 0u) {
+            if (++ctr[2] == 0u) {
+                ++ctr[3];
+            }
+        }
+    }
+}
+
+double R123Rng::uniform() {
+    if (buf_index >= 4) {
+        buffer = rng(ctr, key);
+        buf_index = 0;
+        increment();
+    }
+    return r123::u01<double>(buffer[buf_index++]);
+}
+
+R123Rng R123Rng::fork(uint64_t stream_offset) const {
+    // create a copy with different stream ID (e.g., particle ID)
+    R123Rng new_rng;
+    new_rng.key = this->key;
+    new_rng.ctr = this->ctr;
+    new_rng.ctr[2] = static_cast<uint32_t>(stream_offset & 0xffffffffu);
+    new_rng.ctr[3] = static_cast<uint32_t>(stream_offset >> 32);
+    new_rng.buf_index = 4;
+    return new_rng;
+}
+
+
 // Constructor definition
 Particle::Particle(const std::string &s,
                    double x_, double y_, double z_,
@@ -31,6 +82,15 @@ Particle::Particle(const std::string &s,
     double projectile_mass = species_2_mass(species);
     speed = std::sqrt(2.0 * (energy_*1e-3 * rtt_units::electronChargeSI * 1e6) / (projectile_mass * 1.0e-3)) * 1.0e-8 * 1.0e2; // cm/shk
     id = 1; // TODO: make this unique
+}
+
+void Particle::start_particle_rng() {
+    // Access global RNG from garage
+    extern Garage garage;
+
+    // Derive a unique stream based on total particles created or ID
+    uint64_t stream_id = static_cast<uint64_t>(garage.total_particles_created + id);
+    rng = garage.rng.fork(stream_id);
 }
 
 
@@ -357,6 +417,13 @@ double compute_mixture_molar_mass(const std::vector<std::string>& species,
     }
 
     return sum_rho / sum_rho_over_M; // g/mol
+}
+
+
+double particle_energy_2_speed(double energy, double mass) {
+    double speed = std::sqrt(2.0 * (energy*1e-3 * rtt_units::electronChargeSI * 1e6) / (mass * 1.0e-3)) * 1.0e-8 * 1.0e2; // cm/shk
+
+    return speed;
 }
 
 

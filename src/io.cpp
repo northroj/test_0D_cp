@@ -219,12 +219,12 @@ bool build_cartesian_mesh_after_parse() {
 
     // painting loops: same change
     for (const auto &pb : g_paints) {
-        int ix0 = clamp(pb.ix0, 0, garage.nx);
-        int ix1 = clamp(pb.ix1, 0, garage.nx);
-        int iy0 = clamp(pb.iy0, 0, garage.ny);
-        int iy1 = clamp(pb.iy1, 0, garage.ny);
-        int iz0 = clamp(pb.iz0, 0, garage.nz);
-        int iz1 = clamp(pb.iz1, 0, garage.nz);
+        int ix0 = std::clamp(pb.ix0, 0, garage.nx);
+        int ix1 = std::clamp(pb.ix1, 0, garage.nx);
+        int iy0 = std::clamp(pb.iy0, 0, garage.ny);
+        int iy1 = std::clamp(pb.iy1, 0, garage.ny);
+        int iz0 = std::clamp(pb.iz0, 0, garage.nz);
+        int iz1 = std::clamp(pb.iz1, 0, garage.nz);
         for (int iz=iz0; iz<iz1; ++iz)
           for (int iy=iy0; iy<iy1; ++iy)
             for (int ix=ix0; ix<ix1; ++ix) {
@@ -359,6 +359,10 @@ bool parse_input_file(const std::filesystem::path& path) {
                     garage.source_energy = std::stod(tok[1]);
                 } else if (tok[0] == "strength" && tok.size() == 2) {
                     garage.source_strength = std::stod(tok[1]);
+                } else if (tok[0] == "direction" && tok.size() == 4) {
+                    garage.source_direction[0] = std::stod(tok[1]);
+                    garage.source_direction[1] = std::stod(tok[2]);
+                    garage.source_direction[2] = std::stod(tok[3]);
                 } else {
                     std::cerr << "WARN: Unrecognized source line: " << line << "\n";
                 }

@@ -9,7 +9,7 @@ Infant code for charged particle transport using Draco
 
 ## Basic setup
 
-1) Install Draco (from their github, lanl/draco, or using spack. Current instructions are for using a custom install of tag draco-7_21_0)
+1) Install Draco (from their github [lanl/draco](https://github.com/lanl/Draco) or using spack. Current instructions are for using a custom install of tag draco-7_21_0)
 
 2) Clone galvanize:
 

@@ -4,6 +4,45 @@
 #include <vector>
 #include <cstdint>
 #include <unordered_map>
+#include <cmath>
+#include <atomic>
+
+#include <Random123/philox.h>
+#include <Random123/uniform.hpp>
+
+
+
+// -------------------- R123Rng --------------------
+class R123Rng {
+public:
+    typedef r123::Philox4x32 RNG;
+    typedef RNG::ctr_type ctr_type;
+    typedef RNG::key_type key_type;
+
+private:
+    RNG rng;
+    ctr_type ctr;
+    key_type key;
+    ctr_type buffer;
+    int buf_index = 4; // consume all initially (forces first refill)
+
+public:
+    R123Rng(); // default constructor
+    R123Rng(uint64_t seed, uint64_t stream = 0);
+
+    // Draw a uniform double in [0,1)
+    double uniform();
+
+    // Manually increment 128-bit counter
+    void increment();
+
+    // Reset/seed the RNG
+    void reseed(uint64_t seed, uint64_t stream = 0);
+
+    // Fork a new RNG with modified stream ID (for particles)
+    R123Rng fork(uint64_t stream_offset) const;
+};
+
 
 // ---------- classes ----------
 class Material {
@@ -25,6 +64,80 @@ public:
     Material() = default;
 };
 
+
+struct Direction {
+    double ux = 0.0;
+    double uy = 0.0;
+    double uz = 1.0; 
+
+    inline void normalize() {
+        double n = std::sqrt(ux * ux + uy * uy + uz * uz);
+        if (n == 0.0) {
+            ux = 0.0;
+            uy = 0.0;
+            uz = 1.0;
+            return;
+        }
+        double inv = 1.0 / n;
+        ux *= inv;
+        uy *= inv;
+        uz *= inv;
+    }
+
+    static Direction from_mu_phi(double mu, double phi) {
+        double sinTheta = std::sqrt(std::max(0.0, 1.0 - mu * mu));
+        Direction d;
+        d.ux = sinTheta * std::cos(phi);
+        d.uy = sinTheta * std::sin(phi);
+        d.uz = mu;
+        return d;
+    }
+
+    // Rotate current direction by polar angle (cosTheta) and azimuth (phi)
+    // using a local orthonormal basis {u_hat, a_hat, b_hat}.
+    inline void rotate(double cosTheta, double phi) {
+        double sinTheta = std::sqrt(std::max(0.0, 1.0 - cosTheta * cosTheta));
+        double cphi = std::cos(phi);
+        double sphi = std::sin(phi);
+
+        double ux0 = ux, uy0 = uy, uz0 = uz;
+
+        // Build a_hat perpendicular to u_hat
+        double ax, ay, az;
+        if (std::fabs(uz0) < 0.999999) {
+            // cross(u, ẑ) normalized
+            ax = uy0;
+            ay = -ux0;
+            az = 0.0;
+            double an = std::sqrt(ax * ax + ay * ay);
+            ax /= an;
+            ay /= an;
+        } else {
+            // u ≈ ±ẑ → pick x̂ to avoid singularity
+            ax = 0.0;
+            ay = (uz0 > 0.0) ? 1.0 : -1.0;
+            az = 0.0;
+        }
+
+        // b_hat = cross(u_hat, a_hat)
+        double bx = uy0 * az - uz0 * ay;
+        double by = uz0 * ax - ux0 * az;
+        double bz = ux0 * ay - uy0 * ax;
+
+        // New direction
+        double nx = cosTheta * ux0 + sinTheta * (cphi * ax + sphi * bx);
+        double ny = cosTheta * uy0 + sinTheta * (cphi * ay + sphi * by);
+        double nz = cosTheta * uz0 + sinTheta * (cphi * az + sphi * bz);
+
+        ux = nx;
+        uy = ny;
+        uz = nz;
+
+        // Normalize occasionally to mitigate round-off drift
+        normalize();
+    }
+};
+
 class Particle {
 public:
     std::string species;
@@ -37,10 +150,15 @@ public:
     double z = 0.0;
     int zone = 0;
 
+    //direction
+    Direction dir;
+
     double t = 0.0;  // shk
 
     double energy = 0.0; // MeV
     double speed = 0.0; // cm/shk
+
+    R123Rng rng;
 
     int id = -1;
 
@@ -52,6 +170,8 @@ public:
              double t_,
              double energy_,
              double weight_ = 1.0);
+
+    void start_particle_rng();
 };
 
 // -------------------- Generic N-D array wrapper --------------------
@@ -164,6 +284,8 @@ double species_2_molar_mass(std::string ion_species);
 
 double compute_mixture_molar_mass(const std::vector<std::string>& species,
                                   const std::vector<double>& densities);
+
+double particle_energy_2_speed(double energy, double mass);
 
 
 // -------------------- Binning helper --------------------

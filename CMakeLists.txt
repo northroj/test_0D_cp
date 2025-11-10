@@ -11,6 +11,7 @@ find_package(draco CONFIG REQUIRED)
 find_package(MPI  REQUIRED COMPONENTS C CXX Fortran)
 find_package(GSL  REQUIRED)
 find_package(HDF5 REQUIRED COMPONENTS C CXX)
+find_package(Random123 REQUIRED)
 
 # Helper: link an executable to many Draco targets if they exist in this install
 function(link_if_exists exe)
@@ -31,6 +32,7 @@ add_executable(galvanize
   src/io.cpp
 )
 
+include_directories($ENV{SPACK_ROOT}/opt/spack/linux-rhel8-x86_64/gcc-12.2.0/random123-1.14.0-abcd123/include)
 if (TARGET hdf5::hdf5)
   target_link_libraries(galvanize PRIVATE hdf5::hdf5)
 elseif (TARGET HDF5::HDF5)
