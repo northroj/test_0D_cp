@@ -25,6 +25,7 @@ category csd_energy_loss
 particles d t a
 energy_bins 0 10000 99 lin
 time_bins 0 0.01 99 lin
+x_bins cells
 
 [tallies]
 name test_tally_2

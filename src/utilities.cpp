@@ -1,4 +1,6 @@
+#pragma once
 #include "utilities.h"
+#include "garage.h"
 
 #include <iostream>
 #include <cstdlib>
@@ -85,8 +87,6 @@ Particle::Particle(const std::string &s,
 }
 
 void Particle::start_particle_rng() {
-    // Access global RNG from garage
-    extern Garage garage;
 
     // Derive a unique stream based on total particles created or ID
     uint64_t stream_id = static_cast<uint64_t>(garage.total_particles_created + id);
@@ -94,36 +94,84 @@ void Particle::start_particle_rng() {
 }
 
 
-// -------------------- Tally impl --------------------
 void Tally::finalize() {
-    // Defaults for missing bins
-    if (energy_bins.size() < 2) energy_bins = {0.0, 1e20};
-    if (time_bins.size()   < 2) time_bins   = {0.0, 1e20};
-
     // Build species lookup
     species_index.clear();
     for (int i = 0; i < static_cast<int>(species.size()); ++i) {
         species_index[species[i]] = i;
     }
 
-    const size_t S = species.size();
-    const size_t T = time_bins.size()   - 1;
-    const size_t E = energy_bins.size() - 1;
+    // Build dimension name -> index map and ensure each has valid edges
+    dim_index.clear();
+    for (int d = 0; d < static_cast<int>(dims.size()); ++d) {
+        // Default numeric bin edges if not provided
+        if (dims[d].edges.size() < 2) {
+            dims[d].edges.clear();
+            dims[d].edges.push_back(0.0);
+            dims[d].edges.push_back(1e20);
+        }
+        dim_index[dims[d].name] = d;
+    }
 
-    counts.resize({S, T, E}, 0.0);
+    // Build NDArray shape: {S, N0, N1, ...}
+    std::vector<size_t> nd_dims;
+    nd_dims.reserve(1 + dims.size());
+    nd_dims.push_back(species.size());
+    for (size_t d = 0; d < dims.size(); ++d) {
+        nd_dims.push_back(dims[d].edges.size() - 1); // number of bins
+    }
+
+    counts.resize(nd_dims, 0.0);
 }
 
-bool Tally::add(const std::string& sp, double time, double energy, double contribution) {
-    auto it = species_index.find(sp);
-    if (it == species_index.end()) return false;
 
-    const int tb = bin_index_from_edges(time_bins,   time);
-    const int eb = bin_index_from_edges(energy_bins, energy);
-    if (tb < 0 || eb < 0) return false;
+std::vector<std::string> Tally::dimension_labels() const {
+    std::vector<std::string> labels;
+    labels.reserve(dims.size());
+    for (size_t d = 0; d < dims.size(); ++d) {
+        labels.push_back(dims[d].name);
+    }
+    return labels;
+}
 
-    counts.at({static_cast<size_t>(it->second),
-               static_cast<size_t>(tb),
-               static_cast<size_t>(eb)}) += contribution;
+bool Tally::add(const std::string& sp,
+                const std::vector<DimCoord>& coords,
+                double contribution)
+{
+    // 1) Find species index
+    std::unordered_map<std::string,int>::const_iterator it_s = species_index.find(sp);
+    if (it_s == species_index.end()) return false;
+
+    // 2) Build a quick lookup from dim name -> coordinate value
+    //    (coords.size() is usually small, so a linear search would also be fine.)
+    // For simplicity, use linear search.
+    std::vector<size_t> idx;
+    idx.reserve(1 + dims.size());
+    idx.push_back(static_cast<size_t>(it_s->second)); // species index is first
+
+    // 3) For each numeric dimension, find the coordinate and bin it
+    for (size_t d = 0; d < dims.size(); ++d) {
+        const std::string& dim_name = dims[d].name;
+
+        bool   found = false;
+        double value = 0.0;
+        for (size_t i = 0; i < coords.size(); ++i) {
+            if (coords[i].name == dim_name) {
+                value = coords[i].value;
+                found = true;
+                break;
+            }
+        }
+        if (!found) return false; // missing coordinate for this dimension
+
+        int b = bin_index_from_edges(dims[d].edges, value);
+        if (b < 0) return false; // out of range
+
+        idx.push_back(static_cast<size_t>(b));
+    }
+
+    // 4) Accumulate
+    counts.at(idx) += contribution;
     return true;
 }
 
@@ -161,97 +209,148 @@ inline void sort_unique_with_tol(std::vector<double>& v, double tol = 1e-12)
     v.swap(u);
 }
 
-// -----------------------------------------------------------------------------
-// Main function: add_smear()
-// -----------------------------------------------------------------------------
 bool Tally::add_smear(const std::string& sp,
-                      double t0, double t1,
-                      double e0, double e1,
+                      const std::vector<DimRange>& segments,
                       double contribution)
 {
     // 1) Validate species
-    auto it = species_index.find(sp);
-    if (it == species_index.end()) return false;
-    const size_t s_idx = static_cast<size_t>(it->second);
+    std::unordered_map<std::string,int>::const_iterator it_s = species_index.find(sp);
+    if (it_s == species_index.end()) return false;
+    const size_t s_idx = static_cast<size_t>(it_s->second);
 
-    // 2) Quick reject if entire segment is outside all bins
-    const double tmin = std::min(t0, t1);
-    const double tmax = std::max(t0, t1);
-    const double emin = std::min(e0, e1);
-    const double emax = std::max(e0, e1);
-    if (tmax <= time_bins.front() || tmin >= time_bins.back())   return false;
-    if (emax <= energy_bins.front() || emin >= energy_bins.back()) return false;
+    const size_t D = dims.size();
+
+    // Map each dimension index to its (v0,v1)
+    std::vector<double> a0(D, 0.0);
+    std::vector<double> a1(D, 0.0);
+    std::vector<bool>   have(D, false);
+
+    // Consume segments: ignore any whose name is NOT a dimension in this tally.
+    for (size_t i = 0; i < segments.size(); ++i) {
+        const DimRange& seg = segments[i];
+
+        std::unordered_map<std::string,int>::const_iterator it_d = dim_index.find(seg.name);
+        if (it_d == dim_index.end()) {
+            // Dimension name not present in this tally; ignore it.
+            continue;
+        }
+
+        const size_t d = static_cast<size_t>(it_d->second);
+        if (have[d]) {
+            // Duplicate specification for the same dimension -> ambiguous, treat as error.
+            return false;
+        }
+
+        a0[d]   = seg.v0;
+        a1[d]   = seg.v1;
+        have[d] = true;
+    }
+
+    // Ensure all tally dimensions were specified at least once
+    for (size_t d = 0; d < D; ++d) {
+        if (!have[d]) return false;
+    }
+
+    // 2) Quick reject if entire segment is outside all bins in any dimension
+    for (size_t d = 0; d < D; ++d) {
+        const double vmin = std::min(a0[d], a1[d]);
+        const double vmax = std::max(a0[d], a1[d]);
+
+        const std::vector<double>& edges = dims[d].edges;
+        if (vmax <= edges.front() || vmin >= edges.back()) {
+            return false;
+        }
+    }
 
     // 3) Build list of parametric breakpoints s ∈ [0,1]
     std::vector<double> sbreaks;
-    sbreaks.reserve(time_bins.size() + energy_bins.size() + 2);
+    sbreaks.reserve(2 + D * 8); // rough guess
     sbreaks.push_back(0.0);
     sbreaks.push_back(1.0);
 
-    push_breakpoints(t0, t1, time_bins,   sbreaks);
-    push_breakpoints(e0, e1, energy_bins, sbreaks);
+    for (size_t d = 0; d < D; ++d) {
+        push_breakpoints(a0[d], a1[d], dims[d].edges, sbreaks);
+    }
     sort_unique_with_tol(sbreaks);
-
-    const double dt = (t1 - t0);
-    const double de = (e1 - e0);
 
     // 4) Walk sub-segments and add fractional contributions
     bool any = false;
+
     for (size_t i = 0; i + 1 < sbreaks.size(); ++i) {
-        const double sL = sbreaks[i];
-        const double sR = sbreaks[i + 1];
+        const double sL   = sbreaks[i];
+        const double sR   = sbreaks[i + 1];
         const double frac = sR - sL;
         if (frac <= 0.0) continue;
 
-        const double sm  = 0.5 * (sL + sR);
-        const double tm  = t0 + dt * sm;
-        const double em  = e0 + de * sm;
+        const double sm = 0.5 * (sL + sR);
 
-        const int tb = bin_index_from_edges(time_bins,   tm);
-        const int eb = bin_index_from_edges(energy_bins, em);
-        if (tb < 0 || eb < 0) continue;
+        std::vector<size_t> idx;
+        idx.reserve(1 + D);
+        idx.push_back(s_idx);
 
-        counts.at({ s_idx,
-                    static_cast<size_t>(tb),
-                    static_cast<size_t>(eb) }) += contribution * frac;
+        bool valid = true;
+        for (size_t d = 0; d < D; ++d) {
+            const double v  = a0[d] + (a1[d] - a0[d]) * sm;
+            const int    bin = bin_index_from_edges(dims[d].edges, v);
+            if (bin < 0) { valid = false; break; }
+            idx.push_back(static_cast<size_t>(bin));
+        }
+
+        if (!valid) continue;
+
+        counts.at(idx) += contribution * frac;
         any = true;
     }
 
     return any;
 }
 
-double Tally::retrieve(const std::string& sp, double time, double energy) const {
+double Tally::retrieve(const std::string& sp,
+                       const std::vector<DimCoord>& coords) const
+{
     // 1) Find species index
-    auto it = species_index.find(sp);
-    if (it == species_index.end())
-        return 0.0; // unknown species
+    std::unordered_map<std::string,int>::const_iterator it_s = species_index.find(sp);
+    if (it_s == species_index.end()) return 0.0;
 
-    // 2) Find time and energy bin indices
-    const int tb = bin_index_from_edges(time_bins, time);
-    const int eb = bin_index_from_edges(energy_bins, energy);
-    if (tb < 0 || eb < 0)
-        return 0.0; // value outside bin range
+    std::vector<size_t> idx;
+    idx.reserve(1 + dims.size());
+    idx.push_back(static_cast<size_t>(it_s->second));
 
-    // 3) Access NDArray using multi-index {species, time, energy}
-    return counts.at({ static_cast<size_t>(it->second),
-                       static_cast<size_t>(tb),
-                       static_cast<size_t>(eb) });
+    // 2) For each dimension, find the coordinate and bin index
+    for (size_t d = 0; d < dims.size(); ++d) {
+        const std::string& dim_name = dims[d].name;
+
+        bool   found = false;
+        double value = 0.0;
+        for (size_t i = 0; i < coords.size(); ++i) {
+            if (coords[i].name == dim_name) {
+                value = coords[i].value;
+                found = true;
+                break;
+            }
+        }
+        if (!found) return 0.0; // missing coordinate
+
+        const int b = bin_index_from_edges(dims[d].edges, value);
+        if (b < 0) return 0.0; // out of range
+
+        idx.push_back(static_cast<size_t>(b));
+    }
+
+    // 3) Access NDArray
+    return counts.at(idx);
 }
 
 bool Tally::init(std::string name,
                  std::vector<std::string> species_labels,
-                 std::vector<double> energy_edges,
-                 std::vector<double> time_edges,
+                 std::vector<TallyDim>   dimensions,
                  std::string category)
 {
-    // Basic validation (non-empty species, valid edges)
     if (species_labels.empty()) return false;
 
-    // Assign (move to avoid copies) and finalize
     tally_name     = std::move(name);
     species        = std::move(species_labels);
-    energy_bins    = std::move(energy_edges);
-    time_bins      = std::move(time_edges);
+    dims           = std::move(dimensions);
     tally_category = std::move(category);
 
     finalize();
@@ -260,18 +359,17 @@ bool Tally::init(std::string name,
 
 Tally Tally::Make(std::string name,
                   std::vector<std::string> species_labels,
-                  std::vector<double> energy_edges,
-                  std::vector<double> time_edges,
+                  std::vector<TallyDim>   dimensions,
                   std::string category)
 {
-    if (species_labels.empty())
+    if (species_labels.empty()) {
         throw std::invalid_argument("Tally::Make: species list must not be empty.");
+    }
 
     Tally t;
     t.tally_name     = std::move(name);
     t.species        = std::move(species_labels);
-    t.energy_bins    = std::move(energy_edges);
-    t.time_bins      = std::move(time_edges);
+    t.dims           = std::move(dimensions);
     t.tally_category = std::move(category);
     t.finalize();
     return t;

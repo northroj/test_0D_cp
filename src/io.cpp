@@ -276,6 +276,7 @@ bool parse_input_file(const std::filesystem::path& path) {
 
     Material mat;         bool mat_active   = false;
     Tally    tally;       bool tally_active = false;
+    std::vector<TallyDim> tally_dims;
 
     std::string line;
     while (std::getline(in, line)) {
@@ -302,9 +303,11 @@ bool parse_input_file(const std::filesystem::path& path) {
             if (sec == Section::Tallies && tally_active) {
                 if (tally.tally_name.empty())
                     std::cerr << "WARN: tally without name; will still push\n";
+                tally.dims = std::move(tally_dims);
                 tally.finalize();
                 garage.tallies.push_back(std::move(tally));
                 tally = Tally{};
+                tally_dims.clear();
                 tally_active = false;
             }
 
@@ -379,21 +382,59 @@ bool parse_input_file(const std::filesystem::path& path) {
                     tally.tally_category = tok[1];
                     tally_active = true;
                 } else if (tok[0] == "energy_bins") {
-                    if (!parse_bins_spec(tok, tally.energy_bins)) {
+                    TallyDim energy_dim;
+                    energy_dim.name = "energy";
+                    if (!parse_bins_spec(tok, energy_dim.edges)) {
                         std::cerr << "ERROR: bad energy_bins spec: " << line << "\n";
                         return false;
                     }
                     tally_active = true;
+                    tally_dims.push_back(energy_dim);
                 } else if (tok[0] == "time_bins") {
-                    if (tok.size() == 2) {
-                        if (tok[1] == "timesteps") {
-                            tally.time_bins = {-1e20, -1e20};
-                        }
-                    } else if (!parse_bins_spec(tok, tally.time_bins)) {
+                    TallyDim time_dim;
+                    time_dim.name = "time";
+                    if (tok.size() == 2 && tok[1] == "timesteps") {
+                        time_dim.edges = {-1e20, -1e20};
+                        tally.problem_defined[0] = true;
+                    } else if (!parse_bins_spec(tok, time_dim.edges)) {
                         std::cerr << "ERROR: bad time_bins spec: " << line << "\n";
                         return false;
                     }
                     tally_active = true;
+                    tally_dims.push_back(time_dim);
+                } else if (tok[0] == "x_bins") {
+                    TallyDim x_dim;
+                    x_dim.name = "x";
+                    if (tok.size() == 2 && tok[1] == "cells") {
+                        x_dim.edges = {-1e20, -1e20};
+                        tally.problem_defined[1] = true;
+                    } else if (!parse_bins_spec(tok, x_dim.edges)) {
+                        std::cerr << "ERROR: bad x_bins spec: " << line << "\n";
+                        return false;
+                    }
+                    tally_dims.push_back(x_dim);
+                } else if (tok[0] == "y_bins") {
+                    TallyDim y_dim;
+                    y_dim.name = "y";
+                    if (tok.size() == 2 && tok[1] == "cells") {
+                        y_dim.edges = {-1e20, -1e20};
+                        tally.problem_defined[2] = true;
+                    } else if (!parse_bins_spec(tok, y_dim.edges)) {
+                        std::cerr << "ERROR: bad y_bins spec: " << line << "\n";
+                        return false;
+                    }
+                    tally_dims.push_back(y_dim);
+                } else if (tok[0] == "z_bins") {
+                    TallyDim z_dim;
+                    z_dim.name = "z";
+                    if (tok.size() == 2 && tok[1] == "cells") {
+                        z_dim.edges = {-1e20, -1e20};
+                        tally.problem_defined[3] = true;
+                    } else if (!parse_bins_spec(tok, z_dim.edges)) {
+                        std::cerr << "ERROR: bad z_bins spec: " << line << "\n";
+                        return false;
+                    }
+                    tally_dims.push_back(z_dim);
                 } else {
                     std::cerr << "WARN: Unrecognized tallies line: " << line << "\n";
                 }
@@ -461,9 +502,9 @@ bool parse_input_file(const std::filesystem::path& path) {
     }
 
     // Finalize any active tally at EOF
-    if (!tally.tally_name.empty() || !tally.species.empty()
-        || !tally.energy_bins.empty() || !tally.time_bins.empty())
+    if (!tally.tally_name.empty() || !tally.species.empty())
     {
+        tally.dims = std::move(tally_dims);
         tally.finalize();
         garage.tallies.push_back(std::move(tally));
     }
@@ -616,29 +657,59 @@ static bool h5_write_ndarray_counts(hid_t parent, const char* name, const NDArra
     return ok;
 }
 
+// Write generic tally dimensions:
+// - dim_names: ["time", "energy", "x", ...]
+// - for each dim: "<name>_edges" dataset with its bin edges
+static bool h5_write_tally_dims(hid_t parent, const std::vector<TallyDim>& dims_vec) {
+    bool ok = true;
+
+    // 1) Write the list of dimension names
+    std::vector<std::string> names;
+    names.reserve(dims_vec.size());
+    for (size_t i = 0; i < dims_vec.size(); ++i) {
+        names.push_back(dims_vec[i].name);
+    }
+    ok = ok && h5_write_strvec(parent, "dim_names", names);
+
+    // 2) For each dimension, write its bin edges as "<name>_edges"
+    for (size_t i = 0; i < dims_vec.size(); ++i) {
+        const TallyDim& d = dims_vec[i];
+        std::string dset_name = d.name + "_edges";
+        ok = ok && h5_write_vec_double(parent, dset_name.c_str(), d.edges);
+    }
+
+    return ok;
+}
+
 static bool write_tally_block(hid_t parent_group, const std::vector<Tally>& tallies) {
     bool ok_local = true;
 
     for (const Tally& t : tallies) {
         hid_t g_one = h5_create_group(parent_group, t.tally_name.c_str());
 
-        ok_local = ok_local && h5_write_string    (g_one, "tally_name",      t.tally_name);
-        ok_local = ok_local && h5_write_string    (g_one, "tally_category",  t.tally_category);
-        ok_local = ok_local && h5_write_strvec    (g_one, "species",         t.species);
-        ok_local = ok_local && h5_write_vec_double(g_one, "energy_bins",     t.energy_bins);
-        ok_local = ok_local && h5_write_vec_double(g_one, "time_bins",       t.time_bins);
+        // Basic metadata
+        ok_local = ok_local && h5_write_string    (g_one, "tally_name",     t.tally_name);
+        ok_local = ok_local && h5_write_string    (g_one, "tally_category", t.tally_category);
+        ok_local = ok_local && h5_write_strvec    (g_one, "species",        t.species);
 
-        std::vector<std::string> keys;
-        std::vector<int>         vals;
-        keys.reserve(t.species_index.size());
-        vals.reserve(t.species_index.size());
-        for (const auto& kv : t.species_index) {
-            keys.push_back(kv.first);
-            vals.push_back(kv.second);
+        // NEW: generic dimensions
+        ok_local = ok_local && h5_write_tally_dims(g_one, t.dims);
+
+        // Species index map (optional, but you had it before; still valid)
+        {
+            std::vector<std::string> keys;
+            std::vector<int>         vals;
+            keys.reserve(t.species_index.size());
+            vals.reserve(t.species_index.size());
+            for (const auto& kv : t.species_index) {
+                keys.push_back(kv.first);
+                vals.push_back(kv.second);
+            }
+            ok_local = ok_local && h5_write_strvec(g_one, "species_index_keys",   keys);
+            ok_local = ok_local && h5_write_vec_int(g_one, "species_index_values", vals);
         }
-        ok_local = ok_local && h5_write_strvec(g_one, "species_index_keys",   keys);
-        ok_local = ok_local && h5_write_vec_int(g_one, "species_index_values", vals);
 
+        // Counts array (same as before; NDArray now has shape {S, dim0_bins, dim1_bins, ...})
         ok_local = ok_local && h5_write_ndarray_counts(g_one, "counts", t.counts);
 
         H5Gclose(g_one);

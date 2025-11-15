@@ -44,20 +44,51 @@ void simulate() {
     // set up time steps
     time_step_setup("Uniform"); // TODO: add more type in the future
 
-    // set up time step user tallies
+    // set up problem defined binning
     for (auto &t : garage.tallies) {
-        if (t.time_bins[0] == -1e20) {
-            t.time_bins = garage.time_step_bins;
+        if (t.problem_defined[0] == true) {
+            for (auto &dim : t.dims) {
+                if (dim.name == "time") {
+                    dim.edges = garage.time_step_bins;
+                }
+            }
+            t.finalize(); //redo this to make sure the tally dimensions are correct
+        }
+        if (t.problem_defined[1] == true) {
+            for (auto &dim : t.dims) {
+                if (dim.name == "x") {
+                    dim.edges = garage.x_bin_bounds;
+                }
+            }
+            t.finalize(); //redo this to make sure the tally dimensions are correct
+        }
+        if (t.problem_defined[2] == true) {
+            for (auto &dim : t.dims) {
+                if (dim.name == "y") {
+                    dim.edges = garage.y_bin_bounds;
+                }
+            }
+            t.finalize(); //redo this to make sure the tally dimensions are correct
+        }
+        if (t.problem_defined[3] == true) {
+            for (auto &dim : t.dims) {
+                if (dim.name == "z") {
+                    dim.edges = garage.z_bin_bounds;
+                }
+            }
             t.finalize(); //redo this to make sure the tally dimensions are correct
         }
     }
 
+    TallyDim timestep_dim;
+    timestep_dim.name = "time";
+    timestep_dim.edges = garage.time_step_bins;
     // Initialize standard tallies
-    Tally ion_temperature_time = Tally::Make("ion_temperature_time", {"all"}, {0.0,1e20}, garage.time_step_bins, "ion_temperature_time" );
-    Tally electron_temperature_time = Tally::Make("electron_temperature_time", {"e"}, {0.0,1e20}, garage.time_step_bins, "electron_temperature_time" );
-    Tally ion_density_time = Tally::Make("ion_density_time", garage.materials[0].species, {0.0, 1e20}, garage.time_step_bins, "ion_density_time"); // TODO: more than one material
-    Tally energy_dump_ion = Tally::Make("energy_dump_ion", {"all"}, {0.0, 1e20}, garage.time_step_bins, "energy_dump_ion");
-    Tally energy_dump_electron = Tally::Make("energy_dump_electron", {"e"}, {0.0, 1e20}, garage.time_step_bins, "energy_dump_electron");
+    Tally ion_temperature_time = Tally::Make("ion_temperature_time", {"all"}, {timestep_dim}, "ion_temperature_time" );
+    Tally electron_temperature_time = Tally::Make("electron_temperature_time", {"e"}, {timestep_dim}, "electron_temperature_time" );
+    Tally ion_density_time = Tally::Make("ion_density_time", garage.materials[0].species, {timestep_dim}, "ion_density_time"); // TODO: more than one material
+    Tally energy_dump_ion = Tally::Make("energy_dump_ion", {"all"}, {timestep_dim}, "energy_dump_ion");
+    Tally energy_dump_electron = Tally::Make("energy_dump_electron", {"e"}, {timestep_dim}, "energy_dump_electron");
 
     garage.standard_tallies.push_back(std::move(ion_temperature_time));
     garage.standard_tallies.push_back(std::move(electron_temperature_time));
@@ -109,8 +140,8 @@ void simulate_timestep(int t_it) {
 
     // update material temperatures
     // TODO: multiple materials/cells
-    double ion_energy_dep = garage.standard_tallies[3].retrieve("all", timestep_value, 0.1);
-    double electron_energy_dep = garage.standard_tallies[4].retrieve("e", timestep_value, 0.1);
+    double ion_energy_dep = garage.standard_tallies[3].retrieve("all", {{"time", timestep_value}});
+    double electron_energy_dep = garage.standard_tallies[4].retrieve("e", {{"time", timestep_value}});
     // calculate number density
     double n_ion = 0.0;
     double n_electron = 0.0;
@@ -134,7 +165,7 @@ void simulate_timestep(int t_it) {
     local_material.electron_temperature += dtemp_electron;
     //std::cout << "temp update: " << ion_energy_dep << " " << electron_energy_dep << " " << n_ion << " " << n_electron << " " << dtemp_ion << " " << dtemp_electron << std::endl;
 
-
+    /*
     // update standard tallies
     // TODO: make this work with multiple cells/materials
     // ion temperature
@@ -146,6 +177,7 @@ void simulate_timestep(int t_it) {
         std::string species = garage.materials[0].species[species_it];
         garage.standard_tallies[2].add(species, timestep_value, 0.1, garage.materials[0].densities[species_it]);
     }
+    */
 
     // update user tallies
     const std::string specified_category = "average_particle_energy";
@@ -165,7 +197,7 @@ void simulate_timestep(int t_it) {
             const double energy_coordinate = 0.1; 
 
             // Add the average energy as the "count"/value for this (species, time) bin.
-            t.add(sp, timestep_value, energy_coordinate, avg_energy);
+            t.add(sp, {{"time", timestep_value}}, avg_energy);
         }
     }
  
@@ -224,6 +256,58 @@ void transport_particle(Particle& p, double time_census) {
         double dist_census = t_remaining * (dedt_electron + dedt_ion) / (dedx_electron + dedx_ion);
         double dist_csd = csd_step * p.energy / (dedx_electron + dedx_ion);
 
+        std::vector<double> distances_to_event = {dist_boundary, dist_csd, dist_census};
+        auto it = std::min_element(distances_to_event.begin(), distances_to_event.end());
+        double smallest_distance = *it;
+        size_t event_index = std::distance(distances_to_event.begin(), it);
+
+        double eloss_total = 0.0;
+        if (event_index == 0) {  // boundary event
+            double csd_energy_loss = smallest_distance * (dedx_electron + dedx_ion);
+            double time_to_boundary = csd_energy_loss / (dedt_electron + dedt_ion);
+            eloss_total = csd_energy_loss;
+            double boundary_tolerance = 1.0 + 1e-10;
+            if (boundary_cross.next_zone == -1) { // vacuum boundary
+                particle_active = 0;
+            } else if (boundary_cross.next_zone == -2) { // reflective boundary
+                boundary_tolerance = 1.0 - 1e-10;
+                // reverse particle direction
+                if (boundary_cross.face == 0 || boundary_cross.face == 1) { // hits x face
+                    p.dir.ux = - p.dir.ux;
+                } else if (boundary_cross.face == 2 || boundary_cross.face == 3) { // hits y face
+                    p.dir.uy = - p.dir.uy;
+                } else if (boundary_cross.face == 4 || boundary_cross.face == 5) { // hits z face
+                    p.dir.uz = - p.dir.uz;
+                }
+            }
+            // Update particle
+            // position
+            p.x += smallest_distance * p.dir.ux * boundary_tolerance;
+            p.y += smallest_distance * p.dir.uy * boundary_tolerance;
+            p.z += smallest_distance * p.dir.uz * boundary_tolerance;
+            p.t += time_to_boundary;
+            
+        } else if (event_index == 1) { // Full csd step
+            eloss_total = csd_step * p.energy;
+            // update particle
+            // position
+            p.x += smallest_distance * p.dir.ux;
+            p.y += smallest_distance * p.dir.uy;
+            p.z += smallest_distance * p.dir.uz;
+            p.t += t_eloss; // time
+
+        } else if (event_index == 2) { // census event
+            eloss_total = t_remaining * (dedt_electron + dedt_ion);
+            // Update particle
+            particle_active = 1; // trigger census with 1
+            // position
+            p.x += smallest_distance * p.dir.ux;
+            p.y += smallest_distance * p.dir.uy;
+            p.z += smallest_distance * p.dir.uz;
+            p.t += t_remaining; // time
+        }
+
+        /*
         double eloss_total = 0.0;
         if (t_remaining > t_eloss){ // if the full step can be taken
             //std::cout << "made a complete step" << std::endl;
@@ -238,6 +322,7 @@ void transport_particle(Particle& p, double time_census) {
             particle_active = 1;
             p.t += t_remaining;
         }
+        */
 
         // calculate energy loss
         double eloss_electron = eloss_total * (dedt_electron / (dedt_electron + dedt_ion));
@@ -252,14 +337,14 @@ void transport_particle(Particle& p, double time_census) {
                 // Check if this tally tracks this species
                 if (std::find(t.species.begin(), t.species.end(), p.species) != t.species.end()) {
                     //std::cout << "here tally" << std::endl;
-                    t.add_smear(p.species, initial_p_t, p.t,  p.energy, p.energy-eloss_total, eloss_total*p.weight);
+                    t.add_smear(p.species, {{"time", initial_p_t, p.t}, {"energy", p.energy, p.energy-eloss_total}}, eloss_total*p.weight);
                 }
             }
         }
         // ion energy dep
-        garage.standard_tallies[3].add("all", p.t, 0.1, eloss_total*p.weight);
+        //garage.standard_tallies[3].add("all", p.t, 0.1, eloss_total*p.weight);
         // electron energy dep
-        garage.standard_tallies[4].add("e", p.t, 0.1, eloss_total*p.weight);
+        //garage.standard_tallies[4].add("e", p.t, 0.1, eloss_total*p.weight);
 
         // adjust particle energy and speed
         p.energy -= eloss_total;

@@ -180,64 +180,86 @@ struct NDArray {
     std::vector<size_t> strides;  // row-major
     std::vector<double> data;     // flat storage
 
-    // Compute row-major strides from dims
     static std::vector<size_t> make_strides(const std::vector<size_t>& d);
-
-    // Allocate/resize storage and set all values to init_value
     void resize(const std::vector<size_t>& d, double init_value = 0.0);
-
-    // Convert a multi-index (same length as dims) to flat index
     size_t flat_index(const std::vector<size_t>& idx) const;
-
-    // Element access by multi-index
     double& at(const std::vector<size_t>& idx);
     const double& at(const std::vector<size_t>& idx) const;
 
     size_t size() const { return data.size(); }
 };
 
+// -------------------- Generic tally dimension descriptions --------
+
+// A numeric binned dimension: e.g. "time", "energy", "x", "y".
+struct TallyDim {
+    std::string       name;   // label, e.g. "time"
+    std::vector<double> edges; // bin edges (>= 2)
+};
+
+// A single coordinate along a named dimension: {"energy", 5.0}
+struct DimCoord {
+    std::string name;
+    double      value;
+};
+
+// A straight-line segment along a named dimension: {"energy", e0, e1}
+struct DimRange {
+    std::string name;
+    double      v0;
+    double      v1;
+};
+
 // -------------------- Tally --------------------
 class Tally {
 public:
     std::string              tally_name;     // e.g., "test_tally_1"
-    std::vector<std::string> species;        // labels (order matters)
-    std::vector<double>      energy_bins;    // bin edges (>=2)
-    std::vector<double>      time_bins;      // bin edges (>=2)
-    std::string              tally_category; // Options: [csd_energy_loss, ]
+    std::vector<std::string> species;        // species labels (first dimension)
+    std::string              tally_category; // free-form label
 
-    // built on finalize()
-    std::unordered_map<std::string, int> species_index; // label -> S index
-    NDArray counts;                                      // dims = {S, T, E}
+    std::vector<bool> problem_defined = {false, false, false, false}; // time, x, y, z
 
-    // Ensure defaults, build species_index and counts (call after parsing)
+    // Generic numeric binned dimensions (time, energy, x, y, ...)
+    std::vector<TallyDim> dims;              // order = NDArray dimension order (after species)
+
+    // Built on finalize()
+    std::unordered_map<std::string, int> species_index; // label -> species index
+    std::unordered_map<std::string, int> dim_index;     // dim name -> dim slot (0..dims.size()-1)
+    NDArray counts;                                     // dims = {S, N0, N1, ...}
+
+    // Build indices and allocate counts
     void finalize();
 
-    // Add a contribution to the appropriate [species, time, energy] bin
-    // returns false if out of range or species unknown
-    bool add(const std::string& sp, double time, double energy, double contribution = 1.0);
+    // Return the list of dimension labels (excluding species).
+    std::vector<std::string> dimension_labels() const;
 
+    // Add a contribution at a point in all dimensions.
+    // coords gives values for each named dimension (time, energy, x, ...).
+    bool add(const std::string& sp,
+             const std::vector<DimCoord>& coords,
+             double contribution = 1.0);
+
+    // Add a contribution smeared along a straight segment in ALL dimensions.
+    // segments must specify v0,v1 for every numeric dimension in this tally.
     bool add_smear(const std::string& sp,
-               double t0, double t1,
-               double e0, double e1,
-               double contribution = 1.0);
+                   const std::vector<DimRange>& segments,
+                   double contribution = 1.0);
 
-    // Retrieve the value in the counts array for a given species, time, and energy
-    double retrieve(const std::string& sp, double time, double energy) const;
+    // Retrieve the value at a point (same interface as add, but read-only).
+    double retrieve(const std::string& sp,
+                    const std::vector<DimCoord>& coords) const;
 
-    // initialize everything at once, returns false if inputs are invalid
+    // Initialize everything at once, returns false if inputs are invalid.
     bool init(std::string name,
               std::vector<std::string> species_labels,
-              std::vector<double> energy_edges,
-              std::vector<double> time_edges,
+              std::vector<TallyDim>   dimensions,
               std::string category);
 
-    // factory that returns a ready-to-use Tally (throws on invalid input)
+    // Factory that returns a ready-to-use Tally (throws on invalid input)
     static Tally Make(std::string name,
                       std::vector<std::string> species_labels,
-                      std::vector<double> energy_edges,
-                      std::vector<double> time_edges,
+                      std::vector<TallyDim>   dimensions,
                       std::string category);
-
 };
 
 

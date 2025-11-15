@@ -1,6 +1,6 @@
 # [tallies]
 
-Specifies diagnostic tallies to record quantities such as energy deposition, particle counts, or flux spectra.
+Specifies diagnostic tallies to record quantities such as energy deposition, particle counts, or flux spectra. For the binning parameters, providing 2+ space delimited ascending values should also work.
 
 Each `[tallies]` block defines one independent tally.
 
@@ -8,9 +8,12 @@ Each `[tallies]` block defines one independent tally.
 |--------|------|-------------|
 | `name` | str | Unique name for the tally |
 | `category` | str | Type of measurement (e.g., `csd_energy_loss`, `average_particle_energy`, etc.) |
-| `particles` | list[str] | Species to include (e.g., `d t a`) |
+| `particles` | list[str] | Species to include (e.g., `d t a`) each treated separately |
 | `energy_bins` | float float int mode | Defines energy binning (start end N lin/log/custom) |
-| `time_bins` | float float int mode or `timesteps` | Defines time binning or uses global simulation bins |
+| `time_bins` | float float int mode or `timesteps` or N floats | Defines time binning or uses global simulation bins |
+| `x_bins` | float float int mode or `cells` or N floats | Defines x binning or uses global simulation bins |
+| `y_bins` | float float int mode or `cells` or N floats | Defines y binning or uses global simulation bins |
+| `x_bins` | float float int mode or `cells` or N floats | Defines z binning or uses the geometry as bins |
 
 ---
 
