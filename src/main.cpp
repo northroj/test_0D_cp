@@ -41,7 +41,7 @@ int main(int argc, char** argv) try {
 
     garage.rng.reseed(garage.rng_seed);
 
-    std::cout << "Running <insert_code_name> simulation\n";
+    std::cout << "Running galvanize simulation\n";
     const auto t0_sim = clock_t::now();
     simulate();
     const auto t1_sim = clock_t::now();

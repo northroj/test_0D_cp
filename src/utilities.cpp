@@ -1,4 +1,3 @@
-#pragma once
 #include "utilities.h"
 #include "garage.h"
 

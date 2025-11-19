@@ -13,8 +13,9 @@ struct Garage {
     // optional seed to initialize RNG
     uint64_t rng_seed = 123456789u;
 
-    // Categories
     std::vector<Material> materials;
+
+    // Particle banks
     std::vector<Particle> active_bank;
     std::vector<Particle> census_bank;
     std::vector<Particle> secondary_bank;

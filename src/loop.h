@@ -18,7 +18,9 @@ struct BoundaryCross {
 };
 
 // Returns true if a boundary was found; false if particle not in a valid cell or no forward hit.
-bool distance_to_boundary(const Particle& p, BoundaryCross& out);
+bool distance_to_boundary(Particle& p, BoundaryCross& out);
+
+void nudge_into_cell(double &coord, double lo, double hi, double raw_eps);
 
 void spitzer_csd(class Particle& p, double& dedt_electron, double& dedx_electron, double& dedt_ion, double& dedx_ion);
 

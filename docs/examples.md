@@ -11,12 +11,19 @@ particles d t a
 densities 5.0 5.0 0.0
 mat_id 1
 
+[geometry]
+x -0.05 0.2 99 lin
+y -1e20 1e20
+z -1e20 1e20
+fill 1
+
 [source]
 particle a
 point 0.0 0.0 0.0
 time 0.0
 energy 3500.0
 strength 1e18
+direction 1.0 0.0 0.0
 
 [tallies]
 name test_tally_1
@@ -24,6 +31,7 @@ category csd_energy_loss
 particles d t a
 energy_bins 0 10000 99 lin
 time_bins 0 0.01 99 lin
+x_bins cells
 
 [tallies]
 name test_tally_2

@@ -187,6 +187,11 @@ bool build_cartesian_mesh_after_parse() {
     garage.mesh_strides[1] = static_cast<size_t>(garage.nx);
     garage.mesh_strides[2] = static_cast<size_t>(garage.nx)*garage.ny;
 
+    garage.mesh_cells.clear();
+    garage.mesh_mat_ids.clear();
+    garage.mesh_cells.resize(ncell);          // default-constructed MeshCell
+    garage.mesh_mat_ids.resize(ncell, g_default_fill);    // initialize mat ids to -1 or the default fill
+
     for (int iz=0; iz<garage.nz; ++iz) {
       for (int iy=0; iy<garage.ny; ++iy) {
         for (int ix=0; ix<garage.nx; ++ix) {
@@ -201,6 +206,10 @@ bool build_cartesian_mesh_after_parse() {
             cell.surface_bounds[3] = garage.y_bin_bounds[iy+1];
             cell.surface_bounds[4] = garage.z_bin_bounds[iz];
             cell.surface_bounds[5] = garage.z_bin_bounds[iz+1];
+
+            cell.volume = (cell.surface_bounds[1] - cell.surface_bounds[0]) * 
+                    (cell.surface_bounds[3] - cell.surface_bounds[2]) * 
+                    (cell.surface_bounds[5] - cell.surface_bounds[4]);
 
             // -x, +x
             cell.boundary_conditions[0] = mesh_in_bounds(garage, ix-1,iy,iz) ? static_cast<int>(mesh_flatten(garage, ix-1,iy,iz)) : -1;
@@ -233,10 +242,7 @@ bool build_cartesian_mesh_after_parse() {
             }
     }
 
-
-    // Optionally resolve cell_material for each MeshCell from mat_id table
-    // If you prefer to keep only mat_id per cell, you can skip this resolve and
-    // look up materials by mat_id at usage sites.
+    // add materials to the mesh cell
     auto find_material_by_id = [&](int mid)->const Material*{
         for (const auto &m : garage.materials) {
             // you stored mat_id as a double; cast to int safely

@@ -10,6 +10,7 @@
 #include <numeric>
 #include <cstdint>
 #include <atomic>
+#include <unordered_set>
 
 #include <Random123/philox.h>
 #include <Random123/uniform.hpp>
@@ -80,15 +81,33 @@ void simulate() {
         }
     }
 
+    // set up problem defined dimensions for tallies
     TallyDim timestep_dim;
     timestep_dim.name = "time";
     timestep_dim.edges = garage.time_step_bins;
+    TallyDim x_dim;
+    TallyDim y_dim;
+    TallyDim z_dim;
+    x_dim.name = "x";
+    y_dim.name = "y";
+    z_dim.name = "z";
+    x_dim.edges = garage.x_bin_bounds;
+    y_dim.edges = garage.y_bin_bounds;
+    z_dim.edges = garage.z_bin_bounds;
+    // get a list of all species
+    std::unordered_set<std::string> unique_species;
+    for (auto &m : garage.materials) {
+        for (auto &sp : m.species) {
+            unique_species.insert(sp);
+        }
+    }
+    std::vector<std::string> species_dim(unique_species.begin(), unique_species.end());
     // Initialize standard tallies
-    Tally ion_temperature_time = Tally::Make("ion_temperature_time", {"all"}, {timestep_dim}, "ion_temperature_time" );
-    Tally electron_temperature_time = Tally::Make("electron_temperature_time", {"e"}, {timestep_dim}, "electron_temperature_time" );
-    Tally ion_density_time = Tally::Make("ion_density_time", garage.materials[0].species, {timestep_dim}, "ion_density_time"); // TODO: more than one material
-    Tally energy_dump_ion = Tally::Make("energy_dump_ion", {"all"}, {timestep_dim}, "energy_dump_ion");
-    Tally energy_dump_electron = Tally::Make("energy_dump_electron", {"e"}, {timestep_dim}, "energy_dump_electron");
+    Tally ion_temperature_time = Tally::Make("ion_temperature_time", {"all"}, {timestep_dim, x_dim, y_dim, z_dim}, "ion_temperature_time" );
+    Tally electron_temperature_time = Tally::Make("electron_temperature_time", {"e"}, {timestep_dim, x_dim, y_dim, z_dim}, "electron_temperature_time" );
+    Tally ion_density_time = Tally::Make("ion_density_time", species_dim, {timestep_dim, x_dim, y_dim, z_dim}, "ion_density_time"); // TODO: more than one material
+    Tally energy_dump_ion = Tally::Make("energy_dump_ion", {"all"}, {timestep_dim, x_dim, y_dim, z_dim}, "energy_dump_ion");
+    Tally energy_dump_electron = Tally::Make("energy_dump_electron", {"e"}, {timestep_dim, x_dim, y_dim, z_dim}, "energy_dump_electron");
 
     garage.standard_tallies.push_back(std::move(ion_temperature_time));
     garage.standard_tallies.push_back(std::move(electron_temperature_time));
@@ -139,45 +158,49 @@ void simulate_timestep(int t_it) {
     double timestep_value = (garage.time_step_bins[t_it+1] - garage.time_step_bins[t_it])  /2.0  + garage.time_step_bins[t_it];
 
     // update material temperatures
-    // TODO: multiple materials/cells
-    double ion_energy_dep = garage.standard_tallies[3].retrieve("all", {{"time", timestep_value}});
-    double electron_energy_dep = garage.standard_tallies[4].retrieve("e", {{"time", timestep_value}});
-    // calculate number density
-    double n_ion = 0.0;
-    double n_electron = 0.0;
-    Material& local_material = garage.materials[0];
-    int num_background_species = local_material.species.size();
-    for (int ion_it = 0; ion_it < num_background_species; ++ion_it) {
-        std::string ion_species = local_material.species[ion_it];
-        int ion_z = species_2_z(ion_species);
-        double ion_molar_mass = species_2_z(ion_species);
-        n_ion += local_material.densities[ion_it] * rtt_units::AVOGADRO / ion_molar_mass;
-        n_electron += local_material.densities[ion_it] * rtt_units::AVOGADRO / ion_molar_mass * ion_z;
-    }
-    n_electron = 3.011e24; // FIX: kludge
-    // update assuming ideal monatomic gas
-    double dtemp_ion = 2.0/3.0 * ion_energy_dep / n_ion;
-    double dtemp_electron = 2.0/3.0 * electron_energy_dep / n_electron;
-    if (n_ion == 0.0 || n_electron == 0.0) {
-        std::cout << "Error divide by zero: ion/electron density " << std::endl;
-    }
-    local_material.ion_temperature += dtemp_ion;
-    local_material.electron_temperature += dtemp_electron;
-    //std::cout << "temp update: " << ion_energy_dep << " " << electron_energy_dep << " " << n_ion << " " << n_electron << " " << dtemp_ion << " " << dtemp_electron << std::endl;
+    for (auto &cell : garage.mesh_cells) {
+        // get points in the cell for tallying
+        double x_mid = (cell.surface_bounds[1] - cell.surface_bounds[0]) / 2 + cell.surface_bounds[0];
+        double y_mid = (cell.surface_bounds[3] - cell.surface_bounds[2]) / 2 + cell.surface_bounds[2];
+        double z_mid = (cell.surface_bounds[5] - cell.surface_bounds[4]) / 2 + cell.surface_bounds[4];
+        // get energy deposition from standard tallies
+        double ion_energy_dep = garage.standard_tallies[3].retrieve("all", {{"time", timestep_value}, {"x", x_mid}, {"y", y_mid}, {"z", z_mid}});
+        double electron_energy_dep = garage.standard_tallies[4].retrieve("e", {{"time", timestep_value}, {"x", x_mid}, {"y", y_mid}, {"z", z_mid}});
+        // calculate number density
+        double n_ion = 0.0;
+        double n_electron = 0.0;
+        Material& local_material = cell.cell_material;
+        int num_background_species = local_material.species.size();
+        for (int ion_it = 0; ion_it < num_background_species; ++ion_it) {
+            std::string ion_species = local_material.species[ion_it];
+            int ion_z = species_2_z(ion_species);
+            double ion_molar_mass = species_2_z(ion_species);
+            n_ion += local_material.densities[ion_it] * rtt_units::AVOGADRO / ion_molar_mass;
+            n_electron += local_material.densities[ion_it] * rtt_units::AVOGADRO / ion_molar_mass * ion_z;
+        }
+        n_electron = 3.011e24; // FIX: kludge
+        // update assuming ideal monatomic gas
+        double dtemp_ion = 2.0/3.0 * ion_energy_dep / n_ion;
+        double dtemp_electron = 2.0/3.0 * electron_energy_dep / n_electron;
+        if (n_ion == 0.0 || n_electron == 0.0) {
+            std::cout << "Error divide by zero: ion/electron density " << std::endl;
+        }
+        local_material.ion_temperature += dtemp_ion;
+        local_material.electron_temperature += dtemp_electron;
+        //std::cout << "temp update: " << ion_energy_dep << " " << electron_energy_dep << " " << n_ion << " " << n_electron << " " << dtemp_ion << " " << dtemp_electron << std::endl;
 
-    /*
-    // update standard tallies
-    // TODO: make this work with multiple cells/materials
-    // ion temperature
-    garage.standard_tallies[0].add("all", timestep_value, 0.1, garage.materials[0].ion_temperature);
-    // electron temperature
-    garage.standard_tallies[1].add("e", timestep_value, 0.1, garage.materials[0].electron_temperature);
-    // ion_densities
-    for (int species_it = 0; species_it < garage.materials[0].species.size(); ++species_it){
-        std::string species = garage.materials[0].species[species_it];
-        garage.standard_tallies[2].add(species, timestep_value, 0.1, garage.materials[0].densities[species_it]);
-    }
-    */
+        
+        // update standard tallies
+        // ion temperature
+        garage.standard_tallies[0].add("all", {{"time", timestep_value}, {"x", x_mid}, {"y", y_mid}, {"z", z_mid}}, cell.cell_material.ion_temperature);
+        // electron temperature
+        garage.standard_tallies[1].add("e", {{"time", timestep_value}, {"x", x_mid}, {"y", y_mid}, {"z", z_mid}}, cell.cell_material.electron_temperature);
+        // ion_densities
+        for (int species_it = 0; species_it < cell.cell_material.species.size(); ++species_it){
+            std::string species = cell.cell_material.species[species_it];
+            garage.standard_tallies[2].add(species, {{"time", timestep_value}, {"x", x_mid}, {"y", y_mid}, {"z", z_mid}}, cell.cell_material.densities[species_it]);
+        } 
+    } // end mesh_cell loop
 
     // update user tallies
     const std::string specified_category = "average_particle_energy";
@@ -217,12 +240,13 @@ void transport_particle(Particle& p, double time_census) {
     float csd_step = 0.01;
 
     int zone_index = p.zone;
-    Material local_material = garage.materials[zone_index];
+    Material local_material = garage.mesh_cells[zone_index].cell_material;
     int particle_active = 2; // 2 = alive, 1 = to census, 0 = killed
 
     while ( particle_active == 2 ){
 
         //std::cout << "Particle energy keV: " << p.energy << "  time shk: " << p.t << std::endl;
+        //std::cout << "Particle position cm: " << p.x << " " << p.y << " " << p.z << std::endl;
     
         // evaluate stopping power dE/dx and dE/dt
         double dedt_electron = 0.0;  // keV/shk
@@ -266,8 +290,9 @@ void transport_particle(Particle& p, double time_census) {
             double csd_energy_loss = smallest_distance * (dedx_electron + dedx_ion);
             double time_to_boundary = csd_energy_loss / (dedt_electron + dedt_ion);
             eloss_total = csd_energy_loss;
-            double boundary_tolerance = 1.0 + 1e-10;
+            double boundary_tolerance = 1.0 + 1e-20;
             if (boundary_cross.next_zone == -1) { // vacuum boundary
+                //std::cout << "vaccuum boundary at: " << p.x << " " << p.y << " " << p.z << std::endl;
                 particle_active = 0;
             } else if (boundary_cross.next_zone == -2) { // reflective boundary
                 boundary_tolerance = 1.0 - 1e-10;
@@ -279,6 +304,8 @@ void transport_particle(Particle& p, double time_census) {
                 } else if (boundary_cross.face == 4 || boundary_cross.face == 5) { // hits z face
                     p.dir.uz = - p.dir.uz;
                 }
+            } else {
+                p.zone = boundary_cross.next_zone;
             }
             // Update particle
             // position
@@ -342,9 +369,10 @@ void transport_particle(Particle& p, double time_census) {
             }
         }
         // ion energy dep
-        //garage.standard_tallies[3].add("all", p.t, 0.1, eloss_total*p.weight);
+        double ion_eloss_fraction = dedt_ion / (dedt_ion + dedt_electron);
+        garage.standard_tallies[3].add("all", {{"time", p.t}, {"x", p.x}, {"y", p.y}, {"z", p.z}}, eloss_total*ion_eloss_fraction*p.weight);
         // electron energy dep
-        //garage.standard_tallies[4].add("e", p.t, 0.1, eloss_total*p.weight);
+        garage.standard_tallies[4].add("e", {{"time", p.t}, {"x", p.x}, {"y", p.y}, {"z", p.z}}, eloss_total*(1-ion_eloss_fraction)*p.weight);
 
         // adjust particle energy and speed
         p.energy -= eloss_total;
@@ -353,11 +381,12 @@ void transport_particle(Particle& p, double time_census) {
         
         // kill particle if thermalized
         if (p.energy < 1.5*local_material.ion_temperature){
+            //std::cout << "thermalized particle" << std::endl;
             particle_active = 0; // kill the particle
             for (int species_it = 0; species_it < local_material.species.size(); ++species_it) {
                 if (local_material.species[species_it] == p.species) {
                     double background_modification = p.weight * species_2_mass(p.species);
-                    garage.materials[zone_index].densities[species_it] += background_modification;
+                    garage.mesh_cells[zone_index].cell_material.densities[species_it] += background_modification;
                 }
             }
         }
@@ -376,17 +405,22 @@ static inline bool valid_zone(int zone) {
     return zone >= 0 && zone < static_cast<int>(garage.mesh_cells.size());
 }
 
-bool distance_to_boundary(const Particle& p, BoundaryCross& out) {
+bool distance_to_boundary(Particle& p, BoundaryCross& out) {
     out.distance  = 0.0;
     out.face      = -1;
     out.next_zone = -1;
 
+    //std::cout << "particle position: " << p.x << " " << p.y << " " << p.z << std::endl;
+
     if (!valid_zone(p.zone)) return false;
+
+    //std::cout << "dist_2_col: valid zone" << std::endl;
 
     const MeshCell& cell = garage.mesh_cells[p.zone];
     if (cell.surface_bounds.size() < 6 || cell.boundary_conditions.size() < 6) return false;
 
-    const double x = p.x, y = p.y, z = p.z;
+    //std::cout << "dist_2_col: valid faces" << std::endl;
+
     const double ux = p.dir.ux, uy = p.dir.uy, uz = p.dir.uz;
 
     const double xlo = cell.surface_bounds[0];
@@ -397,22 +431,30 @@ bool distance_to_boundary(const Particle& p, BoundaryCross& out) {
     const double zhi = cell.surface_bounds[5];
 
     // Tiny tolerance to avoid “zero step” stalling when starting exactly on a plane.
-    const double eps_len = 1e-12 * std::max({std::abs(xhi - xlo), std::abs(yhi - ylo), std::abs(zhi - zlo), 1.0});
+    const double eps_len = 1e-20;
     const double INF = std::numeric_limits<double>::infinity();
+
+    // coincidence nudging for particles on faces
+    nudge_into_cell(p.x, xlo, xhi, eps_len);
+    nudge_into_cell(p.y, ylo, yhi, eps_len);
+    nudge_into_cell(p.z, zlo, zhi, eps_len);
+
+    //std::cout << "mesh cell boundaries: " << xlo << " " << xhi << " " << ylo << " " << yhi << " " << zlo << " " << zhi << std::endl;
+    //std::cout << "particle position: " << p.x << " " << p.y << " " << p.z << std::endl;
 
     // Time to planes along each axis; use half-open cells [lo, hi), but
     // allow exact max-edge to go to the +face.
     double tx = INF, ty = INF, tz = INF;
     int f_x = -1, f_y = -1, f_z = -1;
 
-    if (ux > 0.0)        { tx = (xhi - x) / ux; f_x = 1; }  // +x face (index 1)
-    else if (ux < 0.0)   { tx = (xlo - x) / ux; f_x = 0; }  // -x face (index 0)
+    if (ux > 0.0)        { tx = (xhi - p.x) / ux; f_x = 1; }  // +x face (index 1)
+    else if (ux < 0.0)   { tx = (xlo - p.x) / ux; f_x = 0; }  // -x face (index 0)
 
-    if (uy > 0.0)        { ty = (yhi - y) / uy; f_y = 3; }  // +y face (index 3)
-    else if (uy < 0.0)   { ty = (ylo - y) / uy; f_y = 2; }  // -y face (index 2)
+    if (uy > 0.0)        { ty = (yhi - p.y) / uy; f_y = 3; }  // +y face (index 3)
+    else if (uy < 0.0)   { ty = (ylo - p.y) / uy; f_y = 2; }  // -y face (index 2)
 
-    if (uz > 0.0)        { tz = (zhi - z) / uz; f_z = 5; }  // +z face (index 5)
-    else if (uz < 0.0)   { tz = (zlo - z) / uz; f_z = 4; }  // -z face (index 4)
+    if (uz > 0.0)        { tz = (zhi - p.z) / uz; f_z = 5; }  // +z face (index 5)
+    else if (uz < 0.0)   { tz = (zlo - p.z) / uz; f_z = 4; }  // -z face (index 4)
 
     // Only positive forward intersections count.
     if (!(tx > eps_len)) tx = INF;
@@ -425,6 +467,8 @@ bool distance_to_boundary(const Particle& p, BoundaryCross& out) {
     if (tz < tmin) { tmin = tz; face = f_z; }
 
     if (!std::isfinite(tmin)) return false; // no forward hit (e.g., dir==0 or already out)
+
+    //std::cout << "dist_2_col: valid forward hit" << std::endl;
 
     // Pull neighbor / boundary code from the cell
     // Note: your MeshCell.boundary_conditions was shown as vector<double>;
@@ -446,12 +490,39 @@ bool distance_to_boundary(const Particle& p, BoundaryCross& out) {
     return true;
 }
 
+void nudge_into_cell(double &coord, double lo, double hi, double raw_eps) {
+    // Keep the nudge well within the cell if the cell is tiny
+    double eps = raw_eps;
+    if (hi - lo < eps) {
+        eps = (hi - lo) / 20;
+    }
+
+    // Very slightly outside on the low side
+    if (coord < lo && (lo - coord) <= eps) {
+        coord = lo + eps;
+    }
+    // Very slightly outside on the high side
+    else if (coord > hi && (coord - hi) <= eps) {
+        coord = hi - eps;
+    }
+    // Very close inside the low side
+    else if (coord - lo < eps) {
+        coord = lo + eps;
+    }
+    // Very close inside the high side
+    else if (hi - coord < eps) {
+        coord = hi - eps;
+    }
+};
+
 
 void spitzer_csd(Particle& p, double& dedt_electron, double& dedx_electron, double& dedt_ion, double& dedx_ion){
 
     int zone_index = p.zone;
-    Material local_material = garage.materials[zone_index];
+    Material local_material = garage.mesh_cells[zone_index].cell_material;
     int num_background_species = local_material.species.size();
+
+    //std::cout << "local material species and density sizes: " << num_background_species << " " << local_material.densities.size() << std::endl;
 
     // projectile parameters
     std::string projectile_species = p.species;
@@ -461,7 +532,7 @@ void spitzer_csd(Particle& p, double& dedt_electron, double& dedx_electron, doub
     double projectile_speed = p.speed;
 
     double background_molar_mass = compute_mixture_molar_mass(local_material.species, local_material.densities);
-    garage.materials[zone_index].ion_molar_mass = background_molar_mass;
+    garage.mesh_cells[zone_index].cell_material.ion_molar_mass = background_molar_mass;
 
     double total_ion_density = 0; //  g/cc
     double electron_density = 0; // g/cc * Z

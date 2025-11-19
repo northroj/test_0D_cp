@@ -1,6 +1,6 @@
 # [source]
 
-Defines the initial particle source conditions for the simulation.
+Defines the initial particle source conditions for the simulation. Currently, only a single monoenergetic, pulse, point, beam source of a single particle type is allowed.
 
 | Field | Type | Description |
 |--------|------|-------------|

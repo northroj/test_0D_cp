@@ -272,7 +272,9 @@ public:
     Material cell_material;
 
     std::vector<double> surface_bounds; // [-x, +x, -y, +y, -z, +z] position of boundaries
-    std::vector<double> boundary_conditions; 
+    std::vector<int> boundary_conditions; 
+
+    double volume; // cm^3
 
     MeshCell() = default;
     explicit MeshCell(int id) : cell_id(id) {}
