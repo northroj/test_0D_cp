@@ -349,7 +349,7 @@ bool parse_input_file(const std::filesystem::path& path) {
                         mat.densities.push_back(std::stod(tok[i]));
                     mat_active = true;
                 } else if (tok[0] == "mat_id" && tok.size() == 2) {
-                    mat.mat_id = std::stod(tok[1]);
+                    mat.mat_id = std::stoi(tok[1]);
                 } else {
                     std::cerr << "WARN: Unrecognized materials line: " << line << "\n";
                 }
@@ -358,20 +358,31 @@ bool parse_input_file(const std::filesystem::path& path) {
             case Section::Source: {
                 if (tok[0] == "particle" && tok.size() == 2) {
                     garage.source_particle = tok[1];
-                } else if (tok[0] == "point" && tok.size() == 4) {
-                    garage.source_point[0] = std::stod(tok[1]);
-                    garage.source_point[1] = std::stod(tok[2]);
-                    garage.source_point[2] = std::stod(tok[3]);
-                } else if (tok[0] == "time" && tok.size() == 2) {
-                    garage.source_time = std::stod(tok[1]);
-                } else if (tok[0] == "energy" && tok.size() == 2) {
-                    garage.source_energy = std::stod(tok[1]);
+                } else if (tok[0] == "space" ) {
+                    if (tok[1] == "point") {
+                        garage.source_point[0] = std::stod(tok[2]);
+                        garage.source_point[1] = std::stod(tok[3]);
+                        garage.source_point[2] = std::stod(tok[4]);
+                    }
+                } else if (tok[0] == "time") {
+                    if (tok[1] == "point") {
+                        garage.source_time = std::stod(tok[2]);
+                    }
+                } else if (tok[0] == "energy") {
+                    if (tok[1] == "point") {
+                        garage.source_energy = std::stod(tok[2]);
+                    }
                 } else if (tok[0] == "strength" && tok.size() == 2) {
                     garage.source_strength = std::stod(tok[1]);
-                } else if (tok[0] == "direction" && tok.size() == 4) {
-                    garage.source_direction[0] = std::stod(tok[1]);
-                    garage.source_direction[1] = std::stod(tok[2]);
-                    garage.source_direction[2] = std::stod(tok[3]);
+                } else if (tok[0] == "direction") {
+                    if (tok[1] == "isotropic") {
+                        garage.source_direction_category = "isotropic";
+                    } else if (tok[1] == "beam") {
+                        garage.source_direction_category = "beam";
+                        garage.source_direction[0] = std::stod(tok[2]);
+                        garage.source_direction[1] = std::stod(tok[3]);
+                        garage.source_direction[2] = std::stod(tok[4]);
+                    }
                 } else {
                     std::cerr << "WARN: Unrecognized source line: " << line << "\n";
                 }
@@ -453,6 +464,17 @@ bool parse_input_file(const std::filesystem::path& path) {
                     garage.num_t_steps = std::stoi(tok[1]);
                 } else if (tok[0] == "t_step_size" && tok.size() == 2) {
                     garage.t_step_size = std::stod(tok[1]);
+                } else if (tok[0] == "timestep_bins") {
+                    if (!parse_bins_spec(tok, garage.time_step_bins)) {
+                        std::cerr << "ERROR: bad timestep_bins spec: " << line << "\n";
+                        return false;
+                    }
+                } else if (tok[0] == "dimensions" && tok.size() == 2) {
+                    garage.dimensions = std::stoi(tok[1]);
+                } else if (tok[0] == "csd_step" && tok.size() == 2) {
+                    garage.csd_step = std::stod(tok[1]);
+                } else if (tok[0] == "csd_model" && tok.size() == 2) {
+                    garage.csd_model = tok[1];
                 } else {
                     std::cerr << "WARN: Unrecognized settings line: " << line << "\n";
                 }            

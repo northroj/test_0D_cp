@@ -54,10 +54,12 @@ plt.ylabel("Energy loss [keV]")
 plt.show()
 
 kendra_data = np.loadtxt("avg_E_out")
+kendra_data_2 = np.loadtxt("5gcc_avg_E_out")
 plot_avg_particle_energy = average_particle_energy[0,:]
 plt.figure(200)
 plt.plot(average_p_e_time[1:], plot_avg_particle_energy, color="red", label="my code")
 plt.plot(kendra_data[:,0], kendra_data[:,2], color="blue", label="kendra's data")
+plt.plot(kendra_data_2[:,0], kendra_data_2[:,2], color="green", label="kendra's data updated")
 plt.legend()
 plt.xlabel("Time [shk]")
 plt.ylabel("Average particle energy [keV]")

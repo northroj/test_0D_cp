@@ -19,11 +19,11 @@ fill 1
 
 [source]
 particle a
-point 0.0 0.0 0.0
-time 0.0
-energy 3500.0
+space point 0.0 0.0 0.0
+time point 0.0
+energy point 3500.0
 strength 1e18
-direction 1.0 0.0 0.0
+direction beam 1.0 0.0 0.0
 
 [tallies]
 name test_tally_1
@@ -41,7 +41,10 @@ time_bins timesteps
 
 [settings]
 num_particles 1000
-num_t_steps 100
-t_step_size 0.0001
+timestep_bins 0.0 0.01 99 lin
+dimensions 3
+csd_step 10
+csd_model spitzer
+
 
 ```

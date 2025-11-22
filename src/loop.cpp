@@ -43,7 +43,13 @@ static std::mt19937& rng() {
 void simulate() {
 
     // set up time steps
-    time_step_setup("Uniform"); // TODO: add more type in the future
+    //time_step_setup("Uniform"); // TODO: add more type in the future
+    //std::cout << "timestep bins" << std::endl;
+    //for (auto &t : garage.time_step_bins) {
+    //    std::cout << t << " ";
+    //}
+    //std::cout << " " << std::endl;
+    garage.num_t_steps = garage.time_step_bins.size()-1;
 
     // set up problem defined binning
     for (auto &t : garage.tallies) {
@@ -116,7 +122,7 @@ void simulate() {
     garage.standard_tallies.push_back(std::move(energy_dump_electron));
 
     // Loop over timesteps
-    for(int t_it = 0; t_it < garage.num_t_steps; ++t_it) {
+    for (int t_it = 0; t_it < garage.time_step_bins.size()-1; ++t_it) {
         garage.current_time_step = t_it;
         simulate_timestep(t_it);
     }
@@ -229,7 +235,7 @@ void simulate_timestep(int t_it) {
     move_append(garage.active_bank, garage.census_bank);
     
     if (garage.num_t_steps < 101 || (t_it + 1) % 10 == 0) {
-        std::cout << "Finished with timestep: " << t_it + 1 << std::endl;
+        std::cout << "Finished with timestep: " << t_it+1 << std::endl;
     }
     
 }
@@ -237,7 +243,7 @@ void simulate_timestep(int t_it) {
 void transport_particle(Particle& p, double time_census) {
 
     // energy loss for CSD
-    float csd_step = 0.01;
+    double csd_step = garage.csd_step/100;
 
     int zone_index = p.zone;
     Material local_material = garage.mesh_cells[zone_index].cell_material;
@@ -333,23 +339,6 @@ void transport_particle(Particle& p, double time_census) {
             p.z += smallest_distance * p.dir.uz;
             p.t += t_remaining; // time
         }
-
-        /*
-        double eloss_total = 0.0;
-        if (t_remaining > t_eloss){ // if the full step can be taken
-            //std::cout << "made a complete step" << std::endl;
-            // distance for energy loss
-            eloss_total = csd_step * p.energy;
-            double dist_eloss = eloss_total / (dedx_electron + dedx_ion); // cm
-            p.t += t_eloss;
-        } else {
-            //std::cout << "hit census" << std::endl;
-            eloss_total = t_remaining * (dedt_electron + dedt_ion);
-            double dist_eloss = eloss_total / (dedx_electron + dedx_ion); // cm
-            particle_active = 1;
-            p.t += t_remaining;
-        }
-        */
 
         // calculate energy loss
         double eloss_electron = eloss_total * (dedt_electron / (dedt_electron + dedt_ion));
@@ -613,6 +602,8 @@ void source_particles(double time_start, double time_census) {
     
     double particle_weight = (garage.source_strength/garage.num_particles);
 
+    //std::cout << "sourcing time: " << garage.source_time << " " << time_census << " " << time_start << std::endl;
+
     if (garage.source_time >= time_start && garage.source_time < time_census){ // this only works for point source in time
         //std::cout << "sourced particle: " << time_start << " " << time_census << " " << garage.source_time << std::endl;
         for (int source_it = 0; source_it < garage.num_particles; ++source_it){
@@ -623,9 +614,15 @@ void source_particles(double time_start, double time_census) {
             p.y = garage.source_point[1];
             p.z = garage.source_point[2];
             // direction
-            p.dir.ux = garage.source_direction[0];
-            p.dir.uy = garage.source_direction[1];
-            p.dir.uz = garage.source_direction[2];
+            if (garage.source_direction_category == "isotropic") {
+                double mu = garage.rng.uniform()*2.0 - 1.0;
+                double phi = garage.rng.uniform();
+                p.dir.from_mu_phi(mu, phi);
+            } else if (garage.source_direction_category == "beam") {
+                p.dir.ux = garage.source_direction[0];
+                p.dir.uy = garage.source_direction[1];
+                p.dir.uz = garage.source_direction[2];
+            }
             p.dir.normalize();
             // other
             p.t = garage.source_time;
