@@ -11,31 +11,40 @@ Defines the initial particle source conditions for the simulation. Currently, on
 | `strength` | float | Number of particles emitted (or energy-weighted source strength) |
 | `direction` | string+ | The first entry after direction is the category which can be followed by numeric specifics |
 
- <br/><br/>
+<br>
+
+---
 
 | Space category | Type | Description |
 |--------|------|-------------|
 | `point` | 3 floats | Cartesian coordinates of the point source in cm |
 
- <br/><br/>
+<br>
+
+---
 
 | Time category | Type | Description |
 |--------|------|-------------|
 | `point` | float | Emission time in shakes |
 
- <br/><br/>
+<br>
+
+---
 
 | Energy category | Type | Description |
 |--------|------|-------------|
 | `point` | float | Initial particle energy (keV depending on code units) |
 
- <br/><br/>
+<br>
+
+---
 
 | Direction category | Type | Description |
 |--------|------|-------------|
 | `isotropic` | N/A | No subsequent tokens |
 | `beam` | 3 floats | An x,y,z unit vector for the direction (normalized internally) |
 
+<br>
 
 ---
 

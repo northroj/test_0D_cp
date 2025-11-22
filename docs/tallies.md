@@ -14,25 +14,32 @@ Each `[tallies]` block defines one independent tally.
 | `time_bins` | float float int mode or `timesteps` or N floats | Defines time binning or uses global simulation bins |
 | `x_bins` | float float int mode or `cells` or N floats | Defines x binning or uses global simulation bins |
 | `y_bins` | float float int mode or `cells` or N floats | Defines y binning or uses global simulation bins |
-| `x_bins` | float float int mode or `cells` or N floats | Defines z binning or uses the geometry as bins |
- 
- <br/><br/>
+| `z_bins` | float float int mode or `cells` or N floats | Defines z binning or uses the geometry as bins |
+
+<br>
+
+---
 
 Available tally triggering events
+
 | `event` | Description |
 |--------|-------------|
 | `pathlength` | Triggered after every time a particle is moved |
 | `timestep` | Triggered at the end of the timestep (after the census bank is dumped into the active bank) |
- <br/><br/>
+
+<br>
+
+---
  
 Available tally categories
+
 | `category` | Description | Recommended Event |
 |--------|-----|--------|
 | `csd_energy_loss` | Tallies energy lost to continuous slowing down mechanisms | `pathlength` |
 | `average_particle_energy` | Tallies the weighted average energy across particles in the active bank (currently only the particles filter works) | `timestep` |
 
 
-
+<br>
 
 ---
 
